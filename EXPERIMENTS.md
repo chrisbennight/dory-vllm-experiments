@@ -1162,3 +1162,63 @@ unchanged.
   than the accuracy gate's floor allows for kernel changes, as expected from a
   different cache semantics, so it stays a deployment choice rather than a
   default.
+
+### E25: the fused path and the wavefront on Dory's shared KV cache (2026-10-19) - kept
+
+- **Goal:** E24 showed the shared "last_loop" KV cache keeps task quality and
+  triples the KV capacity on unmodified vLLM. Run this work's fused path and
+  wavefront on it, and measure what the wavefront gains.
+- **Change:**
+  - On one shared cache an in-flight token rewrites its own slot at every
+    loop while the younger tokens of the same recurrent call read it, a race.
+    `DecodeAttention.multi_from_raw(..., shared_cache=True)` therefore caches
+    every token's new key and value with `_write_new_kv_kernel` first and runs
+    attention without writing (`WRITE_KV`), so each token reads the older
+    in-flight tokens at their latest loop. `MultiTokenSublayers.attention`
+    passes the flag through; the engine sets it for the recurrent layers when
+    the model's loops share a cache. The fused single-token path already used
+    the shared cache (`mixer.attn[0]`).
+  - DoryConfig no longer refuses `wavefront_decode` with `last_loop`.
+  - Semantics: sequential decoding on a shared cache reads earlier tokens after
+    their last loop; the wavefront's in-flight tokens see older in-flight tokens
+    at their deepest loop so far, so it approximates sequential decoding
+    (WaveFront Decoding treats cross-recurrence KV sharing the same way). A
+    catch-up step still computes vLLM's token after every earlier token is
+    complete.
+- **Checks:**
+  - `kernels/bench_multi_token.py`, one cache shared by 4 tokens, against the
+    single-token sublayers run in position order (each token then sees the new
+    entries below it): outputs within 4 to 9e-4, cached keys and values about
+    exact, as in per-loop mode
+    ([results/multi_token_bench_20261019T115318Z.md](results/multi_token_bench_20261019T115318Z.md)).
+  - In-process, 4 chat prompts x 256 tokens (results/wavefront_smoke/*_ll_*):
+    greedy wavefront against catch-up-only steps (sequential semantics, same
+    kernels) shares 256, 256, 158 and 157 tokens; the fused path also diverges
+    from catch-up-only at token 158 of the third prompt, so one divergence may
+    come from the approximation.
+  - **Accuracy gate passes** against unmodified vLLM on the shared cache
+    ([results/output_agreement_20261019T115915Z/report.md](results/output_agreement_20261019T115915Z/report.md)):
+    no divergent token outside the top 5; over the 6425 positions every
+    configuration shares, the mean |logprob difference| is 0.0066 for the
+    wavefront and for the fused path, against 0.0072 for the FlashInfer floor
+    on the same cache.
+  - Tasks against unmodified vLLM on the shared cache
+    ([results/task_eval_20261019T120832Z/report.md](results/task_eval_20261019T120832Z/report.md)):
+    GSM8K 92.0% against 91.2% (McNemar p = 0.73), MMLU 62.7% against 62.7%
+    (p = 1.00).
+- **Measured:**
+  - In-process, chat prompts: wavefront 265.1 tok/s greedy (97.9% of drafts
+    sampled by vLLM) and 259.4 at temperature 1, top-p 0.95 (97.1%; per-loop
+    240.4 and 94.5%), against 136.7 and 136.1 for the fused path.
+  - Serving at 4 loops, shared cache: unmodified 20261019T111134Z, fused
+    20261019T122346Z, wavefront 20261019T123105Z. One user: 248.4 tok/s at
+    128/1024 (fused 131.5, unmodified 99.9; per-loop wavefront 184.5 to 201.9)
+    and 172.9 at 2560/300 (109.8, 84.6; per-loop 147.2). vLLM sampled 96.2% of
+    drafts on these random-token prompts (per-loop 87 to 92%). Batched rows
+    equal unmodified vLLM on the same cache within run-to-run variation; the
+    64-user rows are 19% and 52% above per-loop serving. KV cache 151,915
+    tokens with the fused path's weights (56,966 per-loop).
+- **Decision:** kept. The wavefront runs on either cache mode; on the shared
+  cache it is the fastest single-user configuration measured (3.2 times vLLM as
+  shipped at 4 loops), with quality within the gate's noise floor. Which mode
+  to serve is a deployment choice (docs/FUTURE_WORK.md).

@@ -40,6 +40,17 @@ Every cache is vLLM's, read through each layer's own block table, because vLLM
 can place one layer's loop caches in KV cache groups with different block
 tables.
 
+With the shared "last_loop" KV cache, one cache per recurrent layer serves every
+loop, and a token's slot holds the latest loop it has run. The in-flight tokens
+of a recurrent call then read each other's slots, so their new keys and values
+are cached before attention runs (MultiTokenSublayers' shared_cache), and each
+token sees the older in-flight tokens at their deepest loop so far. Sequential
+decoding would show them after their last loop, so on a shared cache the
+wavefront approximates sequential decoding rather than matching it (WaveFront
+Decoding calls cross-recurrence KV sharing an approximate extension); a
+catch-up step, which runs vLLM's token after every earlier token is complete,
+still matches it.
+
 Each step reads two numbers back to the host (whether vLLM's token is the
 draft, and its position) to choose between the steady and catch-up CUDA
 graphs. vLLM's scheduling for the step is done before the forward starts, so
@@ -310,9 +321,13 @@ class WavefrontEngine:
                 layer.token_table_offsets[pattern] = torch.tensor(
                     [layer.tables[loop] * width for loop in pattern], **i64)
         self.layers = layers
+        # The recurrent layers' loops share one cache ("last_loop").
+        first = next(i for i in self.recurrent_layers if i in layers)
+        self.shared_kv = not self.backbone.layers[first].mixer.per_loop_kv
         self.pool = torch.cuda.graph_pool_handle()
-        logger.info("Dory wavefront decoding: %d loops, %d block tables, block size %d",
-                    L, len(tables), block_size)
+        logger.info("Dory wavefront decoding: %d loops, %d block tables, block size %d, %s "
+                    "KV cache", L, len(tables), block_size,
+                    "shared (last_loop)" if self.shared_kv else "per-loop")
         return True
 
     # ---- the CUDA graph bodies ----
@@ -399,7 +414,8 @@ class WavefrontEngine:
                     layer.weights, x.bf16, x.nm, positions, layer.rope,
                     layer.token_cache_offsets[pattern], layer.key, layer.value,
                     self.block_tables, layer.token_table_offsets[pattern], seq_lens,
-                    layer.window, layer.scale, out.bf16, out.nm)
+                    layer.window, layer.scale, out.bf16, out.nm,
+                    shared_cache=self.shared_kv and index in self.recurrent_layers)
             x = out
         return x
 

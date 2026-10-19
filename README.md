@@ -122,6 +122,18 @@ loops and 35 to 41% at 4 loops on the benchmark's random-token prompts; at 4
 loops on chat prompts, 77% with temperature 1 and top-p 0.95 and 91% greedy.
 It needs at least two loops.
 
+**On Dory's shared KV cache.** With `recurrent_kv_cache_mode: "last_loop"`
+(one cache per recurrent layer that every loop overwrites, the WaveFront
+paper's cross-recurrence KV sharing) the wavefront runs with every loop
+reading one cache. In-flight tokens then see older in-flight tokens at their
+latest loop rather than their last, so the result approximates sequential
+decoding instead of matching it; it stays within the accuracy gate's noise
+floor and leaves GSM8K and MMLU unchanged. Drafts match more often (96% of
+steps on random-token prompts, against 87 to 92% with per-loop caches), so at
+4 loops one user reaches 248.4 tok/s at 128/1024 and 172.9 at 2560/300, and
+the shared cache holds 2.3 times as many tokens, which lifts 64-user serving by
+up to 52%. See docs/BENCHMARKS.md, section 5.
+
 The design, the research behind it (WaveFront, LoopSpec, LoopAhead) and the
 options considered are in [LOOP_SPECULATION.md](LOOP_SPECULATION.md).
 
@@ -172,11 +184,13 @@ bench/setup_vllm.sh                      # vLLM at vllm#60149's head, into .venv
 bench/download_models.sh                 # BF16, MXFP8 and NVFP4 checkpoints
 git -C src/vllm apply ../../patches/vllm-dory-fused-decode.patch
 
-# Serve with the fused path and wavefront decoding at 4 loops.
+# Serve with the fused path and wavefront decoding at 4 loops. "per_loop"
+# keeps one KV cache per loop (exact); "last_loop" shares one (faster, 2.3x the
+# KV capacity, approximate within the accuracy gate's noise floor).
 DORY_FUSED_DECODE=$PWD/kernels VLLM_USE_FLASHINFER_SAMPLER=0 \
   .venv/bin/vllm serve models/nvfp4 --attention-backend TRITON_ATTN \
   --async-scheduling --hf-overrides \
-  '{"n_recurrent_loops": 4, "recurrent_kv_cache_mode": "per_loop", "wavefront_decode": true}'
+  '{"n_recurrent_loops": 4, "recurrent_kv_cache_mode": "last_loop", "wavefront_decode": true}'
 
 # The benchmarks of docs/BENCHMARKS.md.
 DORY_FUSED_DECODE=$PWD/kernels .venv/bin/python bench/run_baseline.py \

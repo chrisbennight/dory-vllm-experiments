@@ -39,6 +39,10 @@ FUSED_BF16_HEAD_1_4 = "20261019T023002Z"  # the finished fused path, BF16 LM hea
 FUSED_INT8_1 = "20261019T024248Z"
 FUSED_INT8_4 = "20261019T004110Z"
 WAVEFRONT_4 = "20261019T013129Z"
+# Dory's shared KV cache ("last_loop"), 4 loops.
+UNMODIFIED_SHARED_4 = "20261019T111134Z"
+FUSED_SHARED_4 = "20261019T122346Z"
+WAVEFRONT_SHARED_4 = "20261019T123105Z"
 
 # From vLLM as shipped to this work, one feature per step; None where a step
 # does not apply (the wavefront needs at least two loops).
@@ -66,6 +70,11 @@ COLUMN_TABLES = {
                                     ("MXFP8", DEFAULT_MXFP8, "mxfp8", loops),
                                     ("NVFP4", DEFAULT_NVFP4, "nvfp4", loops)], True)
        for loops in (1, 2, 4)},
+    "shared-kv-4": ([("Unmodified, per-loop KV", TRITON_4, "nvfp4", 4),
+                     ("This work, per-loop KV", WAVEFRONT_4, "nvfp4", 4),
+                     ("Unmodified, shared KV", UNMODIFIED_SHARED_4, "nvfp4", 4),
+                     ("Fused path, shared KV", FUSED_SHARED_4, "nvfp4", 4),
+                     ("This work, shared KV", WAVEFRONT_SHARED_4, "nvfp4", 4)], True),
     "features-2": ([("vLLM default", DEFAULT_NVFP4, "nvfp4", 2),
                     ("Triton attention", TRITON_2, "nvfp4", 2),
                     ("+ first fused decode path", FUSED_FIRST, "nvfp4", 2),

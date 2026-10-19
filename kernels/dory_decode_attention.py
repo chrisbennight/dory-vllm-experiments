@@ -55,6 +55,7 @@ def _decode_attention_kernel(
     GROUP: tl.constexpr, GROUP_PAD: tl.constexpr, NUM_HEADS: tl.constexpr,
     SPLITS: tl.constexpr, BLOCKS_PER_TILE: tl.constexpr, RAW_QKV: tl.constexpr,
     Q_STRIDE: tl.constexpr, V_STRIDE: tl.constexpr, MULTI_TOKEN: tl.constexpr,
+    WRITE_KV: tl.constexpr,
 ):
     # RAW_QKV: q_ptr holds FP32 [heads + kv_heads, head_dim], rotated query then
     # key heads before normalization, and v_ptr FP32 [kv_heads, head_dim];
@@ -112,8 +113,9 @@ def _decode_attention_kernel(
         q = (s * s * q).to(tl.bfloat16)
         k_new = (k_new * tl.rsqrt(tl.sum(k_new * k_new, axis=0) + eps)).to(tl.bfloat16)
         # The split whose last tile holds the new token caches it; a negative
-        # slot marks a padding token, which vLLM does not cache.
-        if (split == (tiles - 1) // tiles_per_split) & (slot >= 0):
+        # slot marks a padding token, which vLLM does not cache. Without
+        # WRITE_KV, _write_new_kv_kernel has cached every token already.
+        if WRITE_KV & (split == (tiles - 1) // tiles_per_split) & (slot >= 0):
             base = ((slot // CACHE_BLOCK) * stride_block + (slot % CACHE_BLOCK) * stride_offset
                     + kv_head * stride_head)
             tl.store(key_cache_ptr + base + dims, k_new)
@@ -136,7 +138,7 @@ def _decode_attention_kernel(
                     other=0.0)
         v = tl.load(value_cache_ptr + offsets[:, None] + dims[None, :], mask=valid[:, None],
                     other=0.0)
-        if RAW_QKV:
+        if RAW_QKV and WRITE_KV:
             # This program may have just written the new token; use the registers.
             new = (position == seq_len - 1)[:, None]
             k = tl.where(new, k_new[None, :], k)
@@ -157,6 +159,31 @@ def _decode_attention_kernel(
     tl.store(partial_sum_ptr + index, running_sum, mask=keep)
     tl.store(partial_out_ptr + index[:, None] * HEAD_DIM + dims[None, :], acc,
              mask=keep[:, None])
+
+
+@triton.jit
+def _write_new_kv_kernel(
+    q_ptr, v_ptr, key_cache_ptr, value_cache_ptr, block_table_ptr, seq_lens_ptr,
+    cache_offsets_ptr, block_table_offsets_ptr, stride_block, stride_offset, stride_head,
+    eps, NUM_HEADS: tl.constexpr, HEAD_DIM: tl.constexpr, CACHE_BLOCK: tl.constexpr,
+    Q_STRIDE: tl.constexpr, V_STRIDE: tl.constexpr,
+):
+    """Caches one token's normalized key and its value for one KV head, exactly as
+    _decode_attention_kernel's owner split does (multi-token layout)."""
+    kv_head = tl.program_id(0)
+    token = tl.program_id(1)
+    dims = tl.arange(0, HEAD_DIM)
+    k_new = tl.load(q_ptr + token * Q_STRIDE + (NUM_HEADS + kv_head) * HEAD_DIM + dims)
+    v_new = tl.load(v_ptr + token * V_STRIDE + kv_head * HEAD_DIM + dims).to(tl.bfloat16)
+    k_new = (k_new * tl.rsqrt(tl.sum(k_new * k_new, axis=0) + eps)).to(tl.bfloat16)
+    last = tl.load(seq_lens_ptr + token) - 1
+    table = block_table_ptr + tl.load(block_table_offsets_ptr + token)
+    slot = tl.load(table + last // CACHE_BLOCK).to(tl.int64) * CACHE_BLOCK + last % CACHE_BLOCK
+    offset = tl.load(cache_offsets_ptr + token)
+    base = ((slot // CACHE_BLOCK) * stride_block + (slot % CACHE_BLOCK) * stride_offset
+            + kv_head * stride_head + offset)
+    tl.store(key_cache_ptr + base + dims, k_new)
+    tl.store(value_cache_ptr + base + dims, v_new)
 
 
 @triton.jit
@@ -245,7 +272,8 @@ class DecodeAttention:
                        key_cache: torch.Tensor, value_cache: torch.Tensor,
                        block_tables: torch.Tensor, block_table_offsets: torch.Tensor,
                        seq_lens: torch.Tensor, window: int, softmax_scale: float,
-                       gate: torch.Tensor, out_nibble_major: torch.Tensor) -> None:
+                       gate: torch.Tensor, out_nibble_major: torch.Tensor,
+                       shared_cache: bool = False) -> None:
         """from_raw for T tokens of one sequence: qk [T, (heads + kv_heads) * head_dim],
         v [T, kv_heads * head_dim], gate [T, heads * head_dim], out_nibble_major
         [T, 8, heads * head_dim / 8], seq_lens [T]. Token t is at position
@@ -253,19 +281,32 @@ class DecodeAttention:
         cache_offsets[t] elements, so the caches of one layer's loops must share
         their strides, and the block table at block_tables shifted by
         block_table_offsets[t] elements; it writes its key and value at the slot
-        that block table gives for its position. Offsets are int64."""
+        that block table gives for its position. Offsets are int64.
+
+        shared_cache: tokens may read each other's slots (several loops sharing one
+        cache, where an older token's slot holds its latest loop). Every token's
+        key and value are then cached by a separate kernel before attention, so
+        each token reads the others' new entries rather than racing their writes."""
         tokens = qk.shape[0]
         if (tokens > self.max_tokens or cache_offsets.dtype != torch.int64
                 or block_table_offsets.dtype != torch.int64):
             raise ValueError("too many tokens for the scratch buffers, or non-int64 offsets")
+        if shared_cache:
+            _write_new_kv_kernel[(self.num_kv_heads, tokens)](
+                qk, v, key_cache, value_cache, block_tables, seq_lens, cache_offsets,
+                block_table_offsets, key_cache.stride(0), key_cache.stride(1),
+                key_cache.stride(2), eps, NUM_HEADS=self.num_heads, HEAD_DIM=self.head_dim,
+                CACHE_BLOCK=key_cache.shape[1],
+                Q_STRIDE=(self.num_heads + self.num_kv_heads) * self.head_dim,
+                V_STRIDE=self.num_kv_heads * self.head_dim, num_warps=4)
         self._launch(qk, key_cache, value_cache, block_tables, seq_lens, window, softmax_scale,
                      gate, out_nibble_major, raw=(v, sqk, sqk_factor, eps, seq_lens),
                      tokens=tokens, cache_offsets=cache_offsets,
-                     block_table_offsets=block_table_offsets)
+                     block_table_offsets=block_table_offsets, write_kv=not shared_cache)
 
     def _launch(self, q, key_cache, value_cache, block_table, seq_lens, window, softmax_scale,
                 gate, out_nibble_major, raw, tokens, cache_offsets,
-                block_table_offsets=None) -> None:
+                block_table_offsets=None, write_kv=True) -> None:
         if key_cache.stride() != value_cache.stride() or key_cache.stride(-1) != 1:
             raise ValueError("key and value caches need equal strides and unit last stride")
         v, sqk, sqk_factor, eps, slot_mapping = raw or (q, q, 0.0, 0.0, seq_lens)
@@ -280,7 +321,8 @@ class DecodeAttention:
             GROUP=self.group, GROUP_PAD=max(16, triton.next_power_of_2(self.group)),
             NUM_HEADS=self.num_heads, SPLITS=self.splits, BLOCKS_PER_TILE=self.blocks_per_tile,
             RAW_QKV=raw is not None, Q_STRIDE=q_stride, V_STRIDE=self.num_kv_heads * self.head_dim,
-            MULTI_TOKEN=cache_offsets is not self.no_offset, num_warps=self.num_warps,
+            MULTI_TOKEN=cache_offsets is not self.no_offset, WRITE_KV=write_kv,
+            num_warps=self.num_warps,
             num_stages=self.num_stages)
         _combine_gate_kernel[(self.num_heads, self.head_dim // self.dim_chunk, tokens)](
             self.partial_out, self.partial_max, self.partial_sum, seq_lens, gate,

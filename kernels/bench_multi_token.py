@@ -5,6 +5,8 @@ different loop depths at once. This benchmark loads the real recurrent-block
 weights and gives each token its own KV cache (as a token at its own loop
 depth has) and its own position.
 
+- Accuracy with one shared cache (loops sharing a cache): MultiTokenSublayers
+  with shared_cache against the single-token sublayers run in position order.
 - Accuracy: MultiTokenSublayers for 4 tokens against FusedAttentionSublayer
   (with DecodeAttention) and FusedMlpSublayer run once per token, for a
   sliding-window and a full-attention layer and an MLP layer: relative
@@ -154,6 +156,45 @@ def main() -> int:
                 f"| {relative(multi_kv[t, block, offset, :, :HD], kv_t[block, offset, :, :HD]):.2e} "
                 f"| {relative(multi_kv[t, block, offset, :, HD:], kv_t[block, offset, :, HD:]):.2e} |")
         kv.copy_(start)
+
+    # One cache for all tokens, as when the loops share a cache: each token reads
+    # the new entries of the tokens at lower positions. The reference runs the
+    # single-token sublayer on the same cache one token at a time, lowest
+    # position first, so each token sees exactly those entries.
+    shared_lines = ["", "## One shared cache, against the single-token sublayers in position "
+                    "order", "", "| Sublayer | Token | Output | Cached key | Cached value |",
+                    "|---|---:|---:|---:|---:|"]
+    same = torch.zeros(TOKENS, dtype=torch.int64, device=device)
+    table = block_tables[0]
+    shared_physical = table[positions // CACHE_BLOCK]
+    shared_slots = shared_physical.to(torch.int64) * CACHE_BLOCK + positions % CACHE_BLOCK
+    for index in (sliding, full):
+        w, start = attention[index], caches[index][0].clone()
+        multi_kv = start.clone()
+        key, value = multi_kv.split(HD, dim=-1)
+        multi.attention(w, h, h_nm, positions, rope_of(index), same, key, value, table, same,
+                        seq_lens, window_of(index), scale, out, out_nm, shared_cache=True)
+        multi_out = out.clone()
+        single_kv = start.clone()
+        key_s, value_s = single_kv.split(HD, dim=-1)
+        single_outs = {}
+        for t in sorted(range(TOKENS), key=lambda t: positions[t].item()):
+            single_attention.project_qkvg(w, h_nm[t], positions[t:t + 1], rope_of(index))
+            single_decode.from_raw(single_attention.qk, single_attention.v, w.sqk,
+                                   single_attention.sqk_factor, EPS, shared_slots[t:t + 1],
+                                   key_s, value_s, table, seq_lens[t:t + 1], window_of(index),
+                                   scale, single_attention.gate, gated)
+            single_out, single_out_nm = out[0].clone(), out_nm[0].clone()
+            single_attention.post_attention(w, h[t], gated, single_out, single_out_nm,
+                                            gated_nibble_major=True)
+            single_outs[t] = single_out
+        for t in range(TOKENS):
+            block, offset = shared_physical[t], positions[t] % CACHE_BLOCK
+            shared_lines.append(
+                f"| attention layer {index} ({'sliding' if window_of(index) else 'full'}) | {t} "
+                f"| {relative(multi_out[t], single_outs[t]):.2e} "
+                f"| {relative(multi_kv[block, offset, :, :HD], single_kv[block, offset, :, :HD]):.2e} "
+                f"| {relative(multi_kv[block, offset, :, HD:], single_kv[block, offset, :, HD:]):.2e} |")
     index = mlp_layers[0]
     multi.mlp(mlp[index], h, h_nm, out, out_nm)
     multi_out = out.clone()
@@ -161,6 +202,7 @@ def main() -> int:
         single_out, single_out_nm = out[0].clone(), out_nm[0].clone()
         single_mlp(mlp[index], h[t], h_nm[t], single_out, single_out_nm)
         lines.append(f"| MLP layer {index} | {t} | {relative(multi_out[t], single_out):.2e} | | |")
+    lines += shared_lines
 
     # Timing: the recurrent block's layer pairs, reading every layer's weights.
     pairs = list(zip(attention_layers, mlp_layers))

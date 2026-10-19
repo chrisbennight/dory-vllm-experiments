@@ -23,7 +23,9 @@ prompt-lookup speculation) and nvfp4-triton-fused-wavefront (the default fused
 path plus Dory's wavefront decoding for a request decoding alone, which these
 one-at-a-time prompts always are) and nvfp4-triton-last-loop (unmodified, with
 the model's shared "last_loop" KV cache: one cache per recurrent layer that
-every loop overwrites, instead of one per loop).
+every loop overwrites, instead of one per loop), with its FlashInfer floor
+(nvfp4-flashinfer-last-loop), fused path (nvfp4-triton-fused-last-loop) and
+wavefront (nvfp4-triton-fused-wavefront-last-loop) counterparts.
 
 With --reference, the configurations are compared with generations saved by
 an earlier run (its outputs_<configuration>.json) instead of with the first
@@ -138,6 +140,21 @@ CONFIGS = {
             "prompt_lookup_min": 2})]},
     "nvfp4-triton-last-loop": {"attention": "TRITON_ATTN", "env": {},
                                "overrides": {"recurrent_kv_cache_mode": "last_loop"}},
+    # The same shared cache with FlashInfer attention (the noise floor), the
+    # default fused path, and the fused path with wavefront decoding.
+    "nvfp4-flashinfer-last-loop": {
+        "attention": "FLASHINFER",
+        "env": {"CUDA_HOME": str(CUDA_HOME),
+                "PATH": f"{CUDA_HOME / 'bin'}{os.pathsep}{os.environ['PATH']}"},
+        "overrides": {"recurrent_kv_cache_mode": "last_loop"}},
+    "nvfp4-triton-fused-last-loop": {
+        "attention": "TRITON_ATTN", "env": {"DORY_FUSED_DECODE": str(ROOT / "kernels"),
+                                            "DORY_LM_HEAD_8BIT": "int8"},
+        "overrides": {"recurrent_kv_cache_mode": "last_loop"}},
+    "nvfp4-triton-fused-wavefront-last-loop": {
+        "attention": "TRITON_ATTN", "env": {"DORY_FUSED_DECODE": str(ROOT / "kernels"),
+                                            "DORY_LM_HEAD_8BIT": "int8"},
+        "overrides": {"recurrent_kv_cache_mode": "last_loop", "wavefront_decode": True}},
     "nvfp4-triton-fused-wavefront": {
         "attention": "TRITON_ATTN", "env": {"DORY_FUSED_DECODE": str(ROOT / "kernels"),
                                             "DORY_LM_HEAD_8BIT": "int8"},

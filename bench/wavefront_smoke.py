@@ -53,6 +53,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wavefront", action="store_true")
     parser.add_argument("--loops", type=int, default=4)
+    parser.add_argument("--kv-cache-mode", default="per_loop", choices=["per_loop", "last_loop"])
     parser.add_argument("--prompts", type=int, default=4)
     parser.add_argument("--tokens", type=int, default=256)
     parser.add_argument("--temperature", type=float, default=0.0)
@@ -75,7 +76,8 @@ def main() -> int:
     model = MODELS / "nvfp4"
     # AutoTokenizer validates Dory's model config and rejects its "mlp" layer type.
     tokenizer = PreTrainedTokenizerFast.from_pretrained(str(model))
-    overrides = {"n_recurrent_loops": args.loops, "recurrent_kv_cache_mode": "per_loop"}
+    overrides = {"n_recurrent_loops": args.loops,
+                 "recurrent_kv_cache_mode": args.kv_cache_mode}
     if args.wavefront:
         overrides["wavefront_decode"] = True
     llm = LLM(model=str(model), hf_overrides=overrides, max_model_len=8192, max_num_seqs=64,
@@ -118,6 +120,7 @@ def main() -> int:
 
     engine = llm.apply_model(engine_counters)[0]
     report = {"wavefront": args.wavefront, "loops": args.loops,
+              "kv_cache_mode": args.kv_cache_mode,
               "temperature": args.temperature, "top_p": args.top_p, "engine": engine,
               "prompts": results}
     Path(args.out).write_text(json.dumps(report))

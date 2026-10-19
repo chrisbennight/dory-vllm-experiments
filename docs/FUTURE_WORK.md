@@ -28,6 +28,10 @@ Items from earlier plans that are finished, so they are not repeated below:
   custom-proposer hook (E21). The serving work includes per-token block tables
   in the attention kernel, lookahead KV slots reserved only for a request
   decoding alone, and an allocation check before writing ahead.
+- **Dory's shared KV cache** (cross-recurrence KV sharing, E24, E25): measured
+  on unmodified vLLM, then supported by the fused path and the wavefront, which
+  caches all in-flight tokens' keys and values before attention so tokens
+  sharing a cache read each other's latest loop. Results are below.
 - **Measurement**: the serving matrix, decode profiles, the accuracy gate
   against a noise floor, task checks, idle-GPU checks that also see graphics
   load, the attention-backend and quantization surveys, and a port of vLLM's
@@ -55,7 +59,7 @@ Items from earlier plans that are finished, so they are not repeated below:
   or the fused kernels to read vLLM's.
 - **Narrow support:** an RTX 4090 (kernel launch configurations tuned for it),
   vLLM's Triton attention backend with a BF16 KV cache, tensor parallelism 1,
-  the per-loop KV cache mode, and the V2 model runner. Other configurations
+  and the V2 model runner. Other configurations
   fall back to vLLM's own path where the code detects them, but are not tuned.
 - **The wavefront runs only for a request decoding alone.** With two or more
   users decoding at once, every step runs vLLM's batched path.
@@ -92,22 +96,36 @@ switching attention backends does (log-probability drift 0.0078 against the
 noise floor's 0.0066), as a different cache semantics should, but shows no
 task-quality loss on GSM8K or MMLU.
 
-Next steps:
+The fused path and the wavefront now run on the shared cache too (E25, 4
+loops, random-token serving prompts):
 
-1. **The wavefront on a shared cache.** The kernels only need every loop's
-   cache offset and block table to point at the one cache; the engine refuses
-   `last_loop` today. The wavefront then becomes approximate even against
-   sequential `last_loop` decoding, because an in-flight token reads entries
-   that a sequential step would already have overwritten with deeper loops.
-   Measure the draft match rate (higher, if Dory behaves like Huginn), one
-   user's speed, and accuracy and tasks against sequential `last_loop`
-   decoding.
-2. **The fused path on a shared cache.** It already reads the shared cache
-   (`mixer.attn[0]`); confirm its speed and accuracy, which would also recover
-   far more KV capacity than its duplicate weights cost.
-3. **A serving choice.** For batch-heavy deployments at several loops, the
-   shared cache is worth offering on its own; the choice between it and exact
-   per-loop caches belongs to the deployment.
+| 4 loops | Per-loop KV | Shared KV |
+|---|---:|---:|
+| Fused path, one user, 128/1024 | 131.1 tok/s | 131.5 tok/s |
+| Wavefront, one user, 128/1024 | 184.5 to 201.9 tok/s | 248.4 tok/s |
+| Wavefront, one user, 2560/300 | 147.2 tok/s | 172.9 tok/s |
+| Drafts sampled by vLLM (random prompts) | 87 to 92% | 96.2% |
+| Drafts sampled by vLLM (chat, temperature 1) | 94.5% | 97.1% |
+| KV cache with the fused path | 56,966 tokens | 151,915 tokens |
+
+The wavefront on a shared cache approximates sequential decoding: an
+in-flight token reads older in-flight tokens at their deepest loop so far,
+where sequential decoding would read them after their last loop. It stays
+within the accuracy gate's noise floor (log-probability drift 0.0066 against
+0.0072 for switching attention backends, on the same cache) and leaves GSM8K
+(92.0% against 91.2%) and MMLU (62.7%) unchanged.
+
+Still open:
+
+1. **A default.** At 4 loops the shared cache is faster for one user and holds
+   2.3 times as many tokens, at a measured quality cost within noise; the
+   model card's default is per-loop caches. Which to serve with is a
+   deployment decision, and more task coverage (longer generations, thinking
+   enabled, other benchmarks) would make it a better-informed one.
+2. **Long contexts.** The shared cache's capacity makes 8K-token contexts
+   practical for many users at once; the wavefront's speed there, where
+   attention reads matter more, is not measured.
+3. **Other loop counts.** E24 and E25 measured 4 loops only.
 
 ## Wavefront decoding
 

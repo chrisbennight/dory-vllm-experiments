@@ -386,6 +386,38 @@ Runs: 20261018T045319Z, 20261018T114127Z, 20261018T180516Z, 20261019T003224Z, 20
   at 4 loops: 64 x 1152 tokens against about 57,000 tokens of cache).
 - Against the default backend, batched rows also gain from Triton attention.
 
+### With Dory's shared KV cache (4 loops)
+
+Dory can also keep one KV cache per recurrent layer that every loop overwrites
+(`recurrent_kv_cache_mode: "last_loop"`, the WaveFront paper's cross-recurrence
+KV sharing), instead of one cache per loop. The fused path and the wavefront
+both run on it; the wavefront then approximates sequential decoding (in-flight
+tokens see older in-flight tokens at their latest loop, not their last), within
+the accuracy gate's noise floor (section 6). "Change" is the last column against
+the first.
+
+<!-- table:shared-kv-4 -->
+| Input/output | Users | Unmodified, per-loop KV | This work, per-loop KV | Unmodified, shared KV | Fused path, shared KV | This work, shared KV | Change |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 128/1024 | 1 | 99.6 | 184.5 | 99.9 | 131.5 | 248.4 | +149% |
+| 128/1024 | 16 | 1049.0 | 1049.7 | 1051.0 | 1051.7 | 1050.9 | +0% |
+| 128/1024 | 64 | 1583.8 | 1566.8 | 1889.5 | 1889.2 | 1890.7 | +19% |
+| 2560/300 | 1 | 84.4 | 147.2 | 84.6 | 109.8 | 172.9 | +105% |
+| 2560/300 | 16 | 396.9 | 413.6 | 398.2 | 415.3 | 398.3 | +0% |
+| 2560/300 | 64 | 419.2 | 423.0 | 637.8 | 659.6 | 638.9 | +52% |
+
+Runs: 20261019T003224Z, 20261019T013129Z, 20261019T111134Z, 20261019T122346Z, 20261019T123105Z.
+<!-- /table -->
+
+- The shared cache holds 173,814 tokens on unmodified vLLM and 151,915 with the
+  fused path's weight copy, against 65,169 and 56,966 per-loop, so the
+  64-user rows that filled the per-loop cache gain 19% (128/1024) and 52%
+  (2560/300).
+- Drafts match more often on the shared cache: vLLM sampled 96.2% of them in
+  these random-token runs (87 to 92% per-loop) and 97.1% on chat prompts with
+  temperature 1 and top-p 0.95 (94.5% per-loop), so one user gains 89% over the
+  fused path at 128/1024 (248.4 against 131.5 tok/s) instead of 41%.
+
 ## 6. Accuracy
 
 The fused kernels compute in a different order than vLLM's, and the INT8 head
@@ -403,7 +435,24 @@ positions shared by every configuration (`bench/common_prefix_delta.py`).
 | Fused path, INT8 LM head | 0 | 0.0066 |
 | Fused path, INT8 LM head, wavefront | 0 | 0.0068 |
 
-(`results/output_agreement_20261019T001920Z/report.md`.) The INT8 head was
+(`results/output_agreement_20261019T001920Z/report.md`.)
+
+On the shared KV cache, against unmodified vLLM on the same cache (over the
+6425 positions every configuration shares,
+`results/output_agreement_20261019T115915Z/report.md`):
+
+| 4 loops, shared KV, against unmodified vLLM with Triton | Divergent token outside top 5 | Mean abs logprob difference |
+|---|---:|---:|
+| FlashInfer attention (the noise floor) | 0 | 0.0072 |
+| Fused path, INT8 LM head | 0 | 0.0066 |
+| Fused path, INT8 LM head, wavefront | 0 | 0.0066 |
+
+The shared cache itself, against per-loop caches on unmodified vLLM, drifts
+more (0.0078 against a 0.0066 floor), as a different cache semantics should,
+and leaves tasks unchanged: GSM8K 91.2% against 90.8%, MMLU 62.7% against
+62.3% (`results/task_eval_20261019T105029Z/report.md`). With the wavefront on
+it, GSM8K is 92.0% against 91.2% and MMLU 62.7% against 62.7%
+(`results/task_eval_20261019T120832Z/report.md`). The INT8 head was
 also checked on tasks at 2 loops (`results/task_eval_20261018T195326Z/report.md`):
 GSM8K 89.6% against 90.4% with the BF16 head (250 problems, McNemar p = 0.69)
 and MMLU 60.8% against 60.7% (1000 questions, p = 1.00).

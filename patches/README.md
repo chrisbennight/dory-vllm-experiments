@@ -46,8 +46,12 @@ DORY_FUSED_DECODE=$PWD/kernels VLLM_USE_FLASHINFER_SAMPLER=0 \
 
 The fused path requires vLLM's V2 model runner (the default), Triton attention
 with a BF16 KV cache, and tensor parallelism set to 1. Wavefront decoding also
-requires `recurrent_kv_cache_mode` set to `per_loop`, at least 2 loops, and no
-speculative config.
+requires at least 2 loops and no speculative config. It runs on either KV
+cache mode: `per_loop` (one cache per loop; the wavefront then matches
+sequential decoding token for token) or `last_loop` (one shared cache, about
+2.3 times the KV capacity at 4 loops, and the fastest single-user decoding
+measured here; the wavefront then approximates sequential decoding, within the
+accuracy gate's noise floor).
 
 ## vllm-flex-attention-pr57300-port.patch
 

@@ -185,10 +185,11 @@ class MultiTokenSublayers:
                   cache_offsets: torch.Tensor, key_cache: torch.Tensor,
                   value_cache: torch.Tensor, block_tables: torch.Tensor,
                   block_table_offsets: torch.Tensor, seq_lens: torch.Tensor, window: int,
-                  softmax_scale: float, h_out: torch.Tensor, h_out_nm: torch.Tensor) -> None:
+                  softmax_scale: float, h_out: torch.Tensor, h_out_nm: torch.Tensor,
+                  shared_cache: bool = False) -> None:
         """One attention sublayer for T = h.shape[0] tokens. positions, seq_lens,
-        cache_offsets and block_table_offsets are per token (see
-        DecodeAttention.multi_from_raw); h_out must not alias h."""
+        cache_offsets, block_table_offsets and shared_cache are as in
+        DecodeAttention.multi_from_raw; h_out must not alias h."""
         tokens = h.shape[0]
         partials = self.qkvg_partials[:QKVG.split_k * tokens * self.qkvg_rows].view(
             QKVG.split_k, tokens, self.qkvg_rows)
@@ -201,7 +202,7 @@ class MultiTokenSublayers:
         self.decode_attention.multi_from_raw(
             self.qk[:tokens], self.v[:tokens], w.sqk, self.sqk_factor, EPS, cache_offsets,
             key_cache, value_cache, block_tables, block_table_offsets, seq_lens, window,
-            softmax_scale, self.gate[:tokens], attention_out)
+            softmax_scale, self.gate[:tokens], attention_out, shared_cache=shared_cache)
         out_partials = self.out_partials[:ATTENTION_OUT.split_k * tokens * self.hidden_size].view(
             ATTENTION_OUT.split_k, tokens, self.hidden_size)
         self._gemm(attention_out, w.o_weight, w.o_scale, w.o_global_scale, out_partials,

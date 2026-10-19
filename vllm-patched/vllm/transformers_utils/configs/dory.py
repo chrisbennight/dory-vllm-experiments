@@ -100,8 +100,6 @@ class DoryConfig(PreTrainedConfig):
             raise ValueError("n_recurrent_loops must be a positive integer")
         if self.recurrent_kv_cache_mode not in ("per_loop", "last_loop"):
             raise ValueError("recurrent_kv_cache_mode must be per_loop or last_loop")
-        if self.wavefront_decode and self.recurrent_kv_cache_mode != "per_loop":
-            raise ValueError("wavefront_decode needs recurrent_kv_cache_mode per_loop")
         if any(
             n <= 0
             for n in (self.head_dim, self.num_attention_heads, self.num_key_value_heads)
