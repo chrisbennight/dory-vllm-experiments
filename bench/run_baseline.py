@@ -33,8 +33,9 @@ LOOPS = (1, 2, 4)
 # (input tokens, output tokens); both match NVIDIA's published DGX Spark table.
 SHAPES = ((2560, 300), (128, 1024))
 # Concurrency -> number of measured requests. Concurrency 1 is the
-# single-user case that a custom decode engine would target.
-CONCURRENCY_PROMPTS = {1: 8, 16: 64, 64: 128}
+# single-user case that a custom decode engine would target; 2 to 32 users run
+# four rounds of requests each.
+CONCURRENCY_PROMPTS = {1: 8, 2: 8, 4: 16, 8: 32, 16: 64, 32: 128, 64: 128}
 WARMUP_REQUESTS = 2
 
 PORT = 8011

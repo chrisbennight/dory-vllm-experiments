@@ -44,14 +44,19 @@ UNMODIFIED_SHARED_4 = "20261019T111134Z"
 FUSED_SHARED_4 = "20261019T122346Z"
 WAVEFRONT_SHARED_4 = "20261019T123105Z"
 
+# A step whose run has not been made yet.
+PENDING = "pending"
+
 # From vLLM as shipped to this work, one feature per step; None where a step
-# does not apply (the wavefront needs at least two loops).
+# does not apply (the wavefront needs at least two loops, and with one loop
+# there is nothing to share).
 STEP_LABELS = ("vLLM as shipped", "+ Triton attention", "+ fused decode path",
-               "+ INT8 LM head", "+ wavefront")
+               "+ INT8 LM head", "+ wavefront", "+ shared KV cache")
 STEPS = {
-    1: (DEFAULT_NVFP4, TRITON_NVFP4, FUSED_BF16_HEAD_1_4, FUSED_INT8_1, None),
-    2: (DEFAULT_NVFP4, TRITON_2, FUSED_E9, FUSED_INT8_2, WAVEFRONT_2),
-    4: (DEFAULT_NVFP4, TRITON_4, FUSED_BF16_HEAD_1_4, FUSED_INT8_4, WAVEFRONT_4),
+    1: (DEFAULT_NVFP4, TRITON_NVFP4, FUSED_BF16_HEAD_1_4, FUSED_INT8_1, None, None),
+    2: (DEFAULT_NVFP4, TRITON_2, FUSED_E9, FUSED_INT8_2, WAVEFRONT_2, PENDING),
+    4: (DEFAULT_NVFP4, TRITON_4, FUSED_BF16_HEAD_1_4, FUSED_INT8_4, WAVEFRONT_4,
+        WAVEFRONT_SHARED_4),
 }
 
 # Tables of plain columns: name -> (columns, change). A column is (label, run,
@@ -92,7 +97,7 @@ def output_rates(run: str) -> dict[tuple, float]:
 
 
 def runs_line(runs) -> str:
-    return f"Runs: {', '.join(sorted({run for run in runs if run}))}."
+    return f"Runs: {', '.join(sorted({run for run in runs if run and run != PENDING}))}."
 
 
 def column_table(columns: list[tuple], change: bool) -> str:
@@ -118,8 +123,8 @@ def step_cells(loops: int, inp: int, out: int, users: int) -> list[str]:
     then the total change."""
     cells, first, previous = [], None, None
     for run in STEPS[loops]:
-        if run is None:
-            cells.append("n/a")
+        if run is None or run == PENDING:
+            cells.append("n/a" if run is None else PENDING)
             continue
         value = output_rates(run)[("nvfp4", loops, inp, out, users)]
         cells.append(f"{value:.1f}" if previous is None
@@ -158,7 +163,8 @@ def final_table() -> str:
     lines = ["| " + " | ".join(header) + " |", "|---:|---|---:|" + "---:|" * 5]
     runs = []
     for loops, steps in STEPS.items():
-        shipped, triton, best = steps[0], steps[1], [r for r in steps if r][-1]
+        shipped, triton = steps[0], steps[1]
+        best = [r for r in steps if r and r != PENDING][-1]
         runs += [shipped, triton, best]
         for inp, out in SHAPES:
             for users in CONCURRENCY:
@@ -171,6 +177,47 @@ def final_table() -> str:
     return "\n".join(lines + ["", runs_line(runs)])
 
 
+# The complete suite: every configuration at 1 to 64 users, run in one session.
+SUITE_USERS = (1, 2, 4, 8, 16, 32, 64)
+SUITE_SHIPPED = "PENDING_SHIPPED"  # vLLM as shipped (FLASH_ATTN), per-loop KV
+SUITE_TRITON = "PENDING_TRITON"
+SUITE_TRITON_SHARED = "PENDING_TRITON_SHARED"
+SUITE_FUSED = "PENDING_FUSED"  # fused path, INT8 LM head
+SUITE_FUSED_SHARED = "PENDING_FUSED_SHARED"
+SUITE_WAVEFRONT = "PENDING_WAVEFRONT"
+SUITE_WAVEFRONT_SHARED = "PENDING_WAVEFRONT_SHARED"
+SUITE_COLUMNS = (("vLLM as shipped", SUITE_SHIPPED, False, False),
+                 ("Triton attention", SUITE_TRITON, False, False),
+                 ("Fused path", SUITE_FUSED, False, False),
+                 ("Fused + wavefront", SUITE_WAVEFRONT, False, True),
+                 ("Triton, shared KV", SUITE_TRITON_SHARED, True, False),
+                 ("Fused, shared KV", SUITE_FUSED_SHARED, True, False),
+                 ("Fused + wavefront, shared KV", SUITE_WAVEFRONT_SHARED, True, True))
+
+
+def suite_table(loops: int) -> str:
+    """Every configuration of the complete suite at one loop count; columns that
+    do not apply (a shared cache or the wavefront at 1 loop) are n/a. "Best" is
+    the fastest configuration of this work against vLLM as shipped."""
+    columns = [(label, run if loops > 1 or not (shared or wavefront) else None)
+               for label, run, shared, wavefront in SUITE_COLUMNS]
+    rates = {run: output_rates(run) for _, run in columns if run}
+    header = ["Input/output", "Users", *(label for label, _ in columns), "Best over shipped"]
+    lines = ["| " + " | ".join(header) + " |", "|---|---:|" + "---:|" * (len(header) - 2)]
+    for inp, out in SHAPES:
+        for users in SUITE_USERS:
+            key = ("nvfp4", loops, inp, out, users)
+            values = [rates[run][key] if run else None for _, run in columns]
+            ours = [v for (label, _), v in zip(columns, values)
+                    if v is not None and label not in ("vLLM as shipped", "Triton attention",
+                                                       "Triton, shared KV")]
+            cells = [f"{inp}/{out}", str(users)] + [
+                f"{v:.1f}" if v is not None else "n/a" for v in values]
+            cells.append(f"{(max(ours) / values[0] - 1) * 100:+.0f}%")
+            lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines + ["", runs_line(run for _, run in columns)])
+
+
 def build(name: str) -> str:
     if name in COLUMN_TABLES:
         return column_table(*COLUMN_TABLES[name])
@@ -180,6 +227,8 @@ def build(name: str) -> str:
         return headline_table()
     if name == "final":
         return final_table()
+    if name.startswith("suite-") and int(name.removeprefix("suite-")) in STEPS:
+        return suite_table(int(name.removeprefix("suite-")))
     raise SystemExit(f"unknown table {name!r}")
 
 
