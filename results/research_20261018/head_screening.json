@@ -1,0 +1,55 @@
+{
+  "device": "cpu",
+  "seed": 20261018,
+  "samples": 16,
+  "input_distribution": "Random unit-norm vectors, rounded to BF16; not Dory activations.",
+  "residual_l2_bound_quantiles": {
+    "0.0": 0.40352436900138855,
+    "0.5": 1.0104033946990967,
+    "0.9": 1.3111367225646973,
+    "0.99": 1.72655189037323,
+    "1.0": 3.540252208709717
+  },
+  "scaled_row_l2_quantiles": {
+    "0.0": 51.64514923095703,
+    "0.5": 113.87229919433594,
+    "0.9": 139.46974182128906,
+    "0.99": 161.5397491455078,
+    "1.0": 198.68406677246094
+  },
+  "candidate_count_quantiles": {
+    "0.0": 4.0,
+    "0.5": 37.0,
+    "0.9": 87.9999771118164,
+    "0.99": 141.8000030517578,
+    "1.0": 146.0
+  },
+  "candidate_counts": [
+    19,
+    20,
+    58,
+    50,
+    54,
+    146,
+    4,
+    37,
+    44,
+    33,
+    46,
+    18,
+    9,
+    37,
+    118,
+    28
+  ],
+  "reference_winners_retained": 16,
+  "all_observed_reference_logits_inside_envelopes": true,
+  "approximate_top1_matches": 16,
+  "mean_head_byte_fraction": 0.5019062757492065,
+  "caveats": [
+    "Not a production floating-point certificate.",
+    "No GPU kernel timing or model-quality evaluation.",
+    "Candidate counts must be repeated on real hidden states.",
+    "Greedy selection only; full log probabilities need the full normalizer."
+  ]
+}

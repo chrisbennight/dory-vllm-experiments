@@ -1,0 +1,23 @@
+{
+ "variant": "nvfp4",
+ "loops": 2,
+ "steps": 63,
+ "kernels_per_forward": 786,
+ "period_us": 6458.482600136409,
+ "forward_span_us": 5604.911481584822,
+ "forward_busy_us": 5565.69728500124,
+ "forward_gemm_us": 4053.2970634920866,
+ "weight_bytes": 2890137600.0,
+ "categories_us_per_step": {
+  "Fused elementwise and norms (torch.compile)": 808.5781904762357,
+  "Marlin weight GEMM": 4053.2970634920866,
+  "Attention": 702.9469047618677,
+  "Other": 39.150174603174506,
+  "Dense GEMM": 701.5061587301587,
+  "Memory copies and sets": 10.826571428571391,
+  "Sampling": 60.179412698412676
+ },
+ "idle_us_per_step": 83.02237955729167,
+ "flashinfer_sampler": "0",
+ "cuda_home": "<repo>/cuda/home"
+}

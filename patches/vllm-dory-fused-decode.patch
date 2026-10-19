@@ -1,0 +1,305 @@
+diff --git a/vllm/config/vllm.py b/vllm/config/vllm.py
+index 53b9784..eb48b1e 100644
+--- a/vllm/config/vllm.py
++++ b/vllm/config/vllm.py
+@@ -625,7 +625,11 @@ class VllmConfig:
+         """
+         speculative_config = self.speculative_config
+         if speculative_config is None:
+-            return 0
++            # A model can also write KV past its scheduled tokens on its own
++            # (Dory's wavefront decoding); its config asks for those slots.
++            if self.model_config is None:
++                return 0
++            return getattr(self.model_config.hf_config, "kv_lookahead_tokens", 0)
+         dspark_fill_in = speculative_config.use_dspark() and not getattr(
+             speculative_config.draft_model_config.hf_config, "sample_from_anchor", True
+         )
+diff --git a/vllm/model_executor/models/dory.py b/vllm/model_executor/models/dory.py
+index f5c1b27..5debf28 100644
+--- a/vllm/model_executor/models/dory.py
++++ b/vllm/model_executor/models/dory.py
+@@ -3,6 +3,8 @@
+ """Dory: normalized latent recurrent transformer."""
+ 
+ import math
++import os
++import sys
+ from collections.abc import Iterable
+ 
+ import torch
+@@ -33,6 +35,10 @@ from .utils import maybe_prefix
+ 
+ EPS = 1e-6
+ 
++# Investigation hook: when set to the dory-investigations kernels/ directory,
++# single-token decode steps run the fused Triton kernels from that directory.
++_FUSED_DECODE_KERNELS = os.environ.get("DORY_FUSED_DECODE")
++
+ 
+ def justnorm(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
+     """NGPT normalization: x * rsqrt(sum(x^2) + eps), fp32 accumulation."""
+@@ -307,10 +313,36 @@ class DoryForCausalLM(nn.Module):
+         )
+         self.lm_head.logit_scale = nn.Parameter(torch.empty(config.vocab_size))
+         self.logits_processor = LogitsProcessor(config.vocab_size)
++        self._fused_decoder = None  # built in load_weights when DORY_FUSED_DECODE is set
++        # Wavefront decoding (config.wavefront_decode): a pipelined decode step
++        # for a request decoding alone, built in load_weights on the fused
++        # decoder. vLLM's model runner then runs single-request, single-token
++        # steps outside its FULL CUDA graphs, calls begin_step before each real
++        # forward and hands the engine its sampler.
++        self._wavefront = None
++        self.eager_single_token_decode = bool(config.wavefront_decode)
++        if config.wavefront_decode:
++            if not _FUSED_DECODE_KERNELS:
++                raise ValueError("wavefront_decode needs DORY_FUSED_DECODE")
++            if vllm_config.speculative_config is not None:
++                raise ValueError("wavefront_decode does not combine with speculative decoding")
++        self._max_model_len = vllm_config.model_config.max_model_len
+ 
+     def embed_input_ids(self, input_ids):
+         return self.backbone.embeddings(input_ids)
+ 
++    def bind_sampler(self, sampler) -> None:
++        if self._wavefront is not None:
++            self._wavefront.bind_sampler(sampler)
++
++    def bind_block_tables(self, block_tables) -> None:
++        if self._wavefront is not None:
++            self._wavefront.bind_block_tables(block_tables)
++
++    def begin_step(self, req_ids: list[str], idx_mapping_np) -> None:
++        if self._wavefront is not None:
++            self._wavefront.begin_step(req_ids, idx_mapping_np)
++
+     def forward(
+         self,
+         input_ids: torch.Tensor | None,
+@@ -318,9 +350,35 @@ class DoryForCausalLM(nn.Module):
+         intermediate_tensors: IntermediateTensors | None = None,
+         inputs_embeds: torch.Tensor | None = None,
+     ):
++        # The fused kernels handle exactly one token; this method is outside the
++        # compiled backbone, so the check runs on every call.
++        if (
++            self._fused_decoder is not None
++            and inputs_embeds is None
++            and input_ids is not None
++            and input_ids.shape[0] == 1
++        ):
++            if self._wavefront is not None:
++                hidden_states = self._wavefront.step(input_ids, positions)
++                if hidden_states is not None:
++                    return hidden_states
++            return self._fused_decoder(self.backbone, input_ids, positions)
++        if self._wavefront is not None:
++            self._wavefront.invalidate()
+         return self.backbone(input_ids, positions, inputs_embeds=inputs_embeds)
+ 
+     def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor | None:
++        if self._wavefront is not None and hidden_states.shape[0] == 1:
++            # The wavefront step computed these logits with its readout.
++            logits = self._wavefront.take_logits()
++            if logits is not None:
++                return logits
++        if (
++            self._fused_decoder is not None
++            and self._fused_decoder.lm_head is not None
++            and hidden_states.shape[0] == 1
++        ):
++            return self._fused_decoder.lm_head(hidden_states)
+         logits = self.logits_processor(self.lm_head, hidden_states)
+         if logits is not None:
+             logits = logits.float() * (
+@@ -329,6 +387,42 @@ class DoryForCausalLM(nn.Module):
+         return logits
+ 
+     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
++        if not _FUSED_DECODE_KERNELS:
++            return self._load_weights(weights)
++        # Keep the raw per-layer checkpoint tensors for the fused decoder's own
++        # layouts; vLLM's copies are repacked for its kernels after loading.
++        captured: dict[str, torch.Tensor] = {}
++
++        def capture(stream):
++            for name, w in stream:
++                if name.startswith("backbone.layers."):
++                    captured[name] = w.detach().to("cpu", copy=True)
++                yield name, w
++
++        loaded = self._load_weights(capture(weights))
++        sys.path.insert(0, _FUSED_DECODE_KERNELS)
++        from dory_fused_model import FusedDoryDecoder
++
++        self._fused_decoder = FusedDoryDecoder(
++            self.config,
++            captured,
++            device=self.lm_head.weight.device,
++            lm_head_weight=self.lm_head.weight,
++            logit_scale=self.lm_head.logit_scale,
++        )
++        if self.config.wavefront_decode:
++            from dory_wavefront_engine import WavefrontEngine
++
++            self._wavefront = WavefrontEngine(
++                self._fused_decoder,
++                self.backbone,
++                self.config,
++                self._max_model_len,
++                device=self.lm_head.weight.device,
++            )
++        return loaded
++
++    def _load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+         stacked = [
+             # (target, artifact shard name, shard id)
+             ("qkv_proj", "q_proj", "q"),
+diff --git a/vllm/transformers_utils/configs/dory.py b/vllm/transformers_utils/configs/dory.py
+index e5f1300..14c089f 100644
+--- a/vllm/transformers_utils/configs/dory.py
++++ b/vllm/transformers_utils/configs/dory.py
+@@ -36,6 +36,10 @@ class DoryConfig(PreTrainedConfig):
+     n_recurrent_loops: int = 1
+     # "last_loop" reuses one cache, overwritten by each recurrent loop.
+     recurrent_kv_cache_mode: str = "per_loop"
++    # Wavefront decoding: when one request decodes alone, the model runs its own
++    # pipelined decode step with up to n_recurrent_loops tokens in flight, which
++    # writes KV past the token vLLM scheduled. Needs the fused decode kernels.
++    wavefront_decode: bool = False
+ 
+     def __post_init__(self, **kwargs):
+         if self.layer_types is None:
+@@ -75,6 +79,11 @@ class DoryConfig(PreTrainedConfig):
+         if len(self.layer_types) != self.num_hidden_layers:
+             raise ValueError("layer_types must have num_hidden_layers entries")
+ 
++    @property
++    def kv_lookahead_tokens(self) -> int:
++        """KV slots the model writes past its scheduled tokens on its own."""
++        return self.n_recurrent_loops - 1 if self.wavefront_decode else 0
++
+     def validate_architecture(self):
+         if self.layer_types is None or self.n_recurrent_layers is None:
+             raise ValueError("Dory layer layout must be initialized")
+@@ -91,6 +100,8 @@ class DoryConfig(PreTrainedConfig):
+             raise ValueError("n_recurrent_loops must be a positive integer")
+         if self.recurrent_kv_cache_mode not in ("per_loop", "last_loop"):
+             raise ValueError("recurrent_kv_cache_mode must be per_loop or last_loop")
++        if self.wavefront_decode and self.recurrent_kv_cache_mode != "per_loop":
++            raise ValueError("wavefront_decode needs recurrent_kv_cache_mode per_loop")
+         if any(
+             n <= 0
+             for n in (self.head_dim, self.num_attention_heads, self.num_key_value_heads)
+diff --git a/vllm/v1/core/sched/scheduler.py b/vllm/v1/core/sched/scheduler.py
+index c7619a2..eb05707 100644
+--- a/vllm/v1/core/sched/scheduler.py
++++ b/vllm/v1/core/sched/scheduler.py
+@@ -618,6 +618,15 @@ class Scheduler(SchedulerInterface):
+             num_new_tokens -= self.num_prefill_lookahead - remaining
+         return max(num_new_tokens, 0)
+ 
++    def _step_lookahead_tokens(self) -> int:
++        """Lookahead KV slots for a request scheduled now. Without a speculative
++        config the slots serve the model's own decode step for a request
++        decoding alone (Dory's wavefront decoding, which checks that they are
++        allocated before using them), so larger batches keep that KV."""
++        if self.num_spec_tokens == 0 and len(self.running) > 1:
++            return 0
++        return self.num_lookahead_tokens
++
+     def schedule(self, throttle_prefills: bool = False) -> SchedulerOutput:
+         self.current_step += 1
+         # NOTE(woosuk) on the scheduling algorithm:
+@@ -833,7 +842,7 @@ class Scheduler(SchedulerInterface):
+                     new_blocks = self.kv_cache_manager.allocate_slots(
+                         request,
+                         num_new_tokens,
+-                        num_lookahead_tokens=self.num_lookahead_tokens,
++                        num_lookahead_tokens=self._step_lookahead_tokens(),
+                     )
+ 
+                     if new_blocks is not None:
+@@ -1278,7 +1287,7 @@ class Scheduler(SchedulerInterface):
+                 # mismatching local and remote block counts.
+                 limit_lookahead_tokens = load_kv_async and self.num_lookahead_tokens > 0
+                 effective_lookahead_tokens = (
+-                    0 if limit_lookahead_tokens else self.num_lookahead_tokens
++                    0 if limit_lookahead_tokens else self._step_lookahead_tokens()
+                 )
+ 
+                 # Determine if we need to allocate cross-attention blocks.
+diff --git a/vllm/v1/worker/gpu/cudagraph_utils.py b/vllm/v1/worker/gpu/cudagraph_utils.py
+index a1955b0..70766a9 100644
+--- a/vllm/v1/worker/gpu/cudagraph_utils.py
++++ b/vllm/v1/worker/gpu/cudagraph_utils.py
+@@ -166,6 +166,10 @@ class CudaGraphManager:
+         self.cudagraph_mode = cudagraph_mode
+         self.decode_query_len = decode_query_len
+         self.varlen_decode = varlen_decode
++        # Set by the model runner when the model runs its own decode step for a
++        # single request and token (Dory's wavefront decoding), which must then
++        # run outside a FULL graph.
++        self.eager_single_token_decode = False
+         # DBO supports FULL CUDA graphs only.
+         self.ubatch_runner = ubatch_runner
+ 
+@@ -534,6 +538,13 @@ class CudaGraphManager:
+         key = (num_tokens, effective_loras)
+         if self._graphs_captured and num_tokens > 0 and key in self._candidates:
+             for desc in self._candidates[key]:
++                if (
++                    self.eager_single_token_decode
++                    and num_reqs == 1
++                    and num_tokens == 1
++                    and desc.cg_mode == CUDAGraphMode.FULL
++                ):
++                    continue
+                 if _is_compatible(
+                     desc,
+                     num_reqs,
+diff --git a/vllm/v1/worker/gpu/model_runner.py b/vllm/v1/worker/gpu/model_runner.py
+index 1b75d73..c4a3caf 100644
+--- a/vllm/v1/worker/gpu/model_runner.py
++++ b/vllm/v1/worker/gpu/model_runner.py
+@@ -529,6 +529,11 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+                 mask_stride=self.decode_query_len,
+                 num_bonus_tokens=self.model_state.num_new_sampled_tokens_per_step,
+             )
++            # A model with its own single-request decode step (Dory's wavefront
++            # decoding) reads the request's sampling state from the sampler.
++            bind_sampler = getattr(self.model, "bind_sampler", None)
++            if bind_sampler is not None:
++                bind_sampler(self.sampler)
+ 
+         if self.is_pooling_model and self.is_last_pp_rank:
+             self.pooling_runner = PoolingRunner(self.model, self.vllm_config)
+@@ -762,6 +767,14 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+             varlen_decode=self.adaptive_verification is not None,
+             ubatch_runner=self.ubatch_runner,
+         )
++        self.cudagraph_manager.eager_single_token_decode = getattr(
++            self.model, "eager_single_token_decode", False
++        )
++        # Such a model also checks each request's allocated blocks before
++        # writing KV past its scheduled tokens.
++        bind_block_tables = getattr(self.model, "bind_block_tables", None)
++        if bind_block_tables is not None:
++            bind_block_tables(self.block_tables)
+         if self.cache_config.kv_sharing_fast_prefill and self.pcp_manager is None:
+             self.fast_prefill = FastPrefillHelper(
+                 self.cudagraph_manager, self.max_num_tokens
+@@ -2005,6 +2018,13 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+             self.model_config, input_batch.num_tokens, ubatch_slices
+         )
+ 
++        if not dummy_run:
++            # A model with its own single-request decode step learns which
++            # request each real step serves; dummy runs leave it unset.
++            begin_step = getattr(self.model, "begin_step", None)
++            if begin_step is not None:
++                begin_step(input_batch.req_ids, input_batch.idx_mapping_np)
++
+         self.step_timing.record_batch(
+             input_batch, batch_desc.cg_mode == CUDAGraphMode.FULL
+         )

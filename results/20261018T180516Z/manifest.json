@@ -1,0 +1,62 @@
+{
+ "run_id": "20261018T180516Z",
+ "vllm_pr_sha": "55076950b6c155f384d6766d63563c3bc20a0e3f",
+ "model_revisions": {
+  "bf16": "b366b87f762ea334ba3eb55912031baba1515810",
+  "mxfp8": "f35880f52368271136b48e3a4365f91e70a92308",
+  "nvfp4": "41f02335e1a1ad3289b8b32485e2265cbe97cfdf"
+ },
+ "versions": {
+  "vllm": "0.1.dev1+g55076950b",
+  "torch": "2.14.0+cu130",
+  "torch_cuda": "13.0"
+ },
+ "gpu": {
+  "name": "NVIDIA GeForce RTX 4090",
+  "driver": "595.99.02",
+  "memory_used_mib": "605",
+  "memory_total_mib": "24564",
+  "utilization_pct": "0",
+  "temperature_c": "41",
+  "power_limit_w": "450.00",
+  "max_sm_clock_mhz": "3135",
+  "compute_apps": []
+ },
+ "shapes": [
+  [
+   2560,
+   300
+  ],
+  [
+   128,
+   1024
+  ]
+ ],
+ "concurrency_prompts": {
+  "1": 8,
+  "16": 64,
+  "64": 128
+ },
+ "kv_cache_mode": "per_loop",
+ "attention_backend": "TRITON_ATTN",
+ "server_env_overrides": {
+  "VLLM_USE_FLASHINFER_SAMPLER": "0"
+ },
+ "cuda_home": null,
+ "dory_fused_decode": null,
+ "configs": [
+  {
+   "variant": "nvfp4",
+   "loops": 2,
+   "status": "ok",
+   "benchmarks": [
+    "bench_nvfp4_loops2_in2560_out300_c1.json",
+    "bench_nvfp4_loops2_in2560_out300_c16.json",
+    "bench_nvfp4_loops2_in2560_out300_c64.json",
+    "bench_nvfp4_loops2_in128_out1024_c1.json",
+    "bench_nvfp4_loops2_in128_out1024_c16.json",
+    "bench_nvfp4_loops2_in128_out1024_c64.json"
+   ]
+  }
+ ]
+}

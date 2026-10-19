@@ -1,0 +1,255 @@
+{
+  "peak_bytes_per_second": 1008000000000.0,
+  "pair_weight_bytes": 51609600.0,
+  "recurrent_block_weight_bytes": 1032192000.0,
+  "fixed_block_weight_bytes": 825753600.0,
+  "head_bf16_bytes": 671088640,
+  "head_int8_bytes_including_row_scales": 336068608,
+  "caveats": [
+    "Analytical byte model, not measured performance.",
+    "Main matrix bytes and group scales; small row metadata omitted.",
+    "Wavefront assumes perfect acceptance and batched draft/target coda reads."
+  ],
+  "cases": [
+    {
+      "loops": 1,
+      "prompt_tokens": 640,
+      "full_attention_applications": 9,
+      "sliding_attention_applications": 27,
+      "weight_bytes": 1857945600.0,
+      "kv_bytes": 99090432,
+      "bf16_head": {
+        "ideal_ms": 2.6172665396825394,
+        "ideal_tokens_per_second": 382.0780133922832
+      },
+      "int8_head": {
+        "ideal_ms": 2.2849053968253967,
+        "ideal_tokens_per_second": 437.6548811996245
+      },
+      "perfect_wavefront_optimistic_bf16_head": {
+        "ideal_ms": 2.6172665396825394,
+        "ideal_tokens_per_second": 382.0780133922832
+      }
+    },
+    {
+      "loops": 1,
+      "prompt_tokens": 8192,
+      "full_attention_applications": 9,
+      "sliding_attention_applications": 27,
+      "weight_bytes": 1857945600.0,
+      "kv_bytes": 416415744,
+      "bf16_head": {
+        "ideal_ms": 2.9320733968253965,
+        "ideal_tokens_per_second": 341.05558240210365
+      },
+      "int8_head": {
+        "ideal_ms": 2.599712253968254,
+        "ideal_tokens_per_second": 384.6579553077767
+      },
+      "perfect_wavefront_optimistic_bf16_head": {
+        "ideal_ms": 2.9320733968253965,
+        "ideal_tokens_per_second": 341.05558240210365
+      }
+    },
+    {
+      "loops": 1,
+      "prompt_tokens": 32768,
+      "full_attention_applications": 9,
+      "sliding_attention_applications": 27,
+      "weight_bytes": 1857945600.0,
+      "kv_bytes": 1322385408,
+      "bf16_head": {
+        "ideal_ms": 3.8308528253968253,
+        "ideal_tokens_per_second": 261.03848035363075
+      },
+      "int8_head": {
+        "ideal_ms": 3.4984916825396826,
+        "ideal_tokens_per_second": 285.83746675483405
+      },
+      "perfect_wavefront_optimistic_bf16_head": {
+        "ideal_ms": 3.8308528253968253,
+        "ideal_tokens_per_second": 261.03848035363075
+      }
+    },
+    {
+      "loops": 1,
+      "prompt_tokens": 65536,
+      "full_attention_applications": 9,
+      "sliding_attention_applications": 27,
+      "weight_bytes": 1857945600.0,
+      "kv_bytes": 2530344960,
+      "bf16_head": {
+        "ideal_ms": 5.029225396825397,
+        "ideal_tokens_per_second": 198.83777741026103
+      },
+      "int8_head": {
+        "ideal_ms": 4.696864253968254,
+        "ideal_tokens_per_second": 212.9080054112969
+      },
+      "perfect_wavefront_optimistic_bf16_head": {
+        "ideal_ms": 5.029225396825397,
+        "ideal_tokens_per_second": 198.83777741026103
+      }
+    },
+    {
+      "loops": 2,
+      "prompt_tokens": 640,
+      "full_attention_applications": 14,
+      "sliding_attention_applications": 42,
+      "weight_bytes": 2890137600.0,
+      "kv_bytes": 154140672,
+      "bf16_head": {
+        "ideal_ms": 3.695879873015873,
+        "ideal_tokens_per_second": 270.57156464990584
+      },
+      "int8_head": {
+        "ideal_ms": 3.36351873015873,
+        "ideal_tokens_per_second": 297.3076947761811
+      },
+      "perfect_wavefront_optimistic_bf16_head": {
+        "ideal_ms": 2.6718798730158726,
+        "ideal_tokens_per_second": 374.2683232503467
+      }
+    },
+    {
+      "loops": 2,
+      "prompt_tokens": 8192,
+      "full_attention_applications": 14,
+      "sliding_attention_applications": 42,
+      "weight_bytes": 2890137600.0,
+      "kv_bytes": 647757824,
+      "bf16_head": {
+        "ideal_ms": 4.185579428571429,
+        "ideal_tokens_per_second": 238.9155473131967
+      },
+      "int8_head": {
+        "ideal_ms": 3.8532182857142856,
+        "ideal_tokens_per_second": 259.5233194307927
+      },
+      "perfect_wavefront_optimistic_bf16_head": {
+        "ideal_ms": 3.1615794285714283,
+        "ideal_tokens_per_second": 316.29760459690675
+      }
+    },
+    {
+      "loops": 2,
+      "prompt_tokens": 32768,
+      "full_attention_applications": 14,
+      "sliding_attention_applications": 42,
+      "weight_bytes": 2890137600.0,
+      "kv_bytes": 2057043968,
+      "bf16_head": {
+        "ideal_ms": 5.583680761904762,
+        "ideal_tokens_per_second": 179.09333334788823
+      },
+      "int8_head": {
+        "ideal_ms": 5.251319619047619,
+        "ideal_tokens_per_second": 190.4283251723612
+      },
+      "perfect_wavefront_optimistic_bf16_head": {
+        "ideal_ms": 4.559680761904762,
+        "ideal_tokens_per_second": 219.3135993981868
+      }
+    },
+    {
+      "loops": 2,
+      "prompt_tokens": 65536,
+      "full_attention_applications": 14,
+      "sliding_attention_applications": 42,
+      "weight_bytes": 2890137600.0,
+      "kv_bytes": 3936092160,
+      "bf16_head": {
+        "ideal_ms": 7.447815873015872,
+        "ideal_tokens_per_second": 134.26755132643555
+      },
+      "int8_head": {
+        "ideal_ms": 7.11545473015873,
+        "ideal_tokens_per_second": 140.5391556721621
+      },
+      "perfect_wavefront_optimistic_bf16_head": {
+        "ideal_ms": 6.423815873015872,
+        "ideal_tokens_per_second": 155.67071344629264
+      }
+    },
+    {
+      "loops": 4,
+      "prompt_tokens": 640,
+      "full_attention_applications": 24,
+      "sliding_attention_applications": 72,
+      "weight_bytes": 4954521600.0,
+      "kv_bytes": 264241152,
+      "bf16_head": {
+        "ideal_ms": 5.85310653968254,
+        "ideal_tokens_per_second": 170.8494443455386
+      },
+      "int8_head": {
+        "ideal_ms": 5.520745396825397,
+        "ideal_tokens_per_second": 181.13496061148402
+      },
+      "perfect_wavefront_optimistic_bf16_head": {
+        "ideal_ms": 2.7811065396825394,
+        "ideal_tokens_per_second": 359.5691088174382
+      }
+    },
+    {
+      "loops": 4,
+      "prompt_tokens": 8192,
+      "full_attention_applications": 24,
+      "sliding_attention_applications": 72,
+      "weight_bytes": 4954521600.0,
+      "kv_bytes": 1110441984,
+      "bf16_head": {
+        "ideal_ms": 6.692591492063492,
+        "ideal_tokens_per_second": 149.41895096777753
+      },
+      "int8_head": {
+        "ideal_ms": 6.360230349206349,
+        "ideal_tokens_per_second": 157.22700988727294
+      },
+      "perfect_wavefront_optimistic_bf16_head": {
+        "ideal_ms": 3.620591492063492,
+        "ideal_tokens_per_second": 276.1979643911906
+      }
+    },
+    {
+      "loops": 4,
+      "prompt_tokens": 32768,
+      "full_attention_applications": 24,
+      "sliding_attention_applications": 72,
+      "weight_bytes": 4954521600.0,
+      "kv_bytes": 3526361088,
+      "bf16_head": {
+        "ideal_ms": 9.089336634920635,
+        "ideal_tokens_per_second": 110.01903000908402
+      },
+      "int8_head": {
+        "ideal_ms": 8.756975492063491,
+        "ideal_tokens_per_second": 114.1946783916784
+      },
+      "perfect_wavefront_optimistic_bf16_head": {
+        "ideal_ms": 6.0173366349206345,
+        "ideal_tokens_per_second": 166.186480941861
+      }
+    },
+    {
+      "loops": 4,
+      "prompt_tokens": 65536,
+      "full_attention_applications": 24,
+      "sliding_attention_applications": 72,
+      "weight_bytes": 4954521600.0,
+      "kv_bytes": 6747586560,
+      "bf16_head": {
+        "ideal_ms": 12.284996825396826,
+        "ideal_tokens_per_second": 81.40010243492256
+      },
+      "int8_head": {
+        "ideal_ms": 11.952635682539682,
+        "ideal_tokens_per_second": 83.66355560061052
+      },
+      "perfect_wavefront_optimistic_bf16_head": {
+        "ideal_ms": 9.212996825396825,
+        "ideal_tokens_per_second": 108.54231461834111
+      }
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+ "variant": "nvfp4",
+ "loops": 2,
+ "steps": 63,
+ "kernels_per_forward": 786,
+ "period_us": 6321.389047774058,
+ "forward_span_us": 5498.566793774801,
+ "forward_busy_us": 5459.217068142361,
+ "forward_gemm_us": 4088.738015873039,
+ "weight_bytes": 2890137600.0,
+ "categories_us_per_step": {
+  "Fused elementwise and norms (torch.compile)": 816.9906507936678,
+  "Marlin weight GEMM": 4088.738015873039,
+  "Attention": 447.1679365079376,
+  "Other": 139.1395714285718,
+  "Dense GEMM": 701.5759682539682,
+  "Memory copies and sets": 4.529333333333332,
+  "Sampling": 60.13915873015872
+ },
+ "idle_us_per_step": 64.08820064484127
+}

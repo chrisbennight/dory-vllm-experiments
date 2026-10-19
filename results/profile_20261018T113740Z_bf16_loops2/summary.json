@@ -1,0 +1,20 @@
+{
+ "variant": "bf16",
+ "loops": 2,
+ "steps": 63,
+ "kernels_per_forward": 758,
+ "period_us": 14004.73993985615,
+ "forward_span_us": 13183.90867203001,
+ "forward_busy_us": 13142.707620287698,
+ "forward_gemm_us": 11391.572555555325,
+ "weight_bytes": 10276044800.0,
+ "categories_us_per_step": {
+  "Fused elementwise and norms (torch.compile)": 793.3915238095705,
+  "Dense GEMM": 12092.98020634897,
+  "Attention": 944.7218888889051,
+  "Other": 43.82595238095259,
+  "Memory copies and sets": 4.698222222222216,
+  "Sampling": 60.457888888888824
+ },
+ "idle_us_per_step": 65.78383866567461
+}

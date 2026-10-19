@@ -1,0 +1,28 @@
+{
+ "variant": "nvfp4",
+ "loops": 2,
+ "steps": 63,
+ "kernels_per_forward": 345,
+ "period_us": 5328.660590277777,
+ "forward_span_us": 4504.774123418899,
+ "forward_busy_us": 4487.167492094494,
+ "forward_gemm_us": 4045.3046984126954,
+ "weight_bytes": 2890137600.0,
+ "categories_us_per_step": {
+  "Other": 37.574142857142874,
+  "Fused normalization and residual": 7.9962380952380805,
+  "Fused weight GEMV": 4045.3046984126954,
+  "Attention": 429.50884126982646,
+  "Dense GEMM": 701.5556984126983,
+  "Memory copies and sets": 4.673968253968254,
+  "Sampling": 60.664793650793634
+ },
+ "idle_us_per_step": 42.44085984002976,
+ "flashinfer_sampler": "0",
+ "dory_fused_decode": "<repo>/kernels",
+ "dory_fold_residual": null,
+ "dory_fused_kv_write": null,
+ "dory_fused_attention": null,
+ "dory_lm_head_8bit": null,
+ "cuda_home": null
+}

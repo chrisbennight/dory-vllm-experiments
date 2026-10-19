@@ -1,0 +1,29 @@
+# Recreated by bench/setup_vllm.sh, bench/download_models.sh and
+# bench/setup_cuda_toolkit.sh.
+/.venv/
+/src/
+/models/
+/cuda/
+/build/
+__pycache__/
+
+# Console logs from local runs.
+logs/
+
+# Large raw outputs that bench/run_baseline.py, bench/profile_decode.py and
+# bench/compare_outputs.py regenerate: profiler traces, server logs and greedy
+# generations with log-probabilities.
+results/**/trace.json.gz
+results/**/*.log
+results/**/reference_*.json
+results/**/outputs_*.json
+
+# Task-evaluation samples downloaded by bench/fetch_eval_data.py.
+data/
+
+# Raw per-position data from bench/loop_agreement.py (its report.md is kept).
+results/**/histories.json
+results/**/scores_loops*.json
+
+# Temporary git worktrees.
+.worktrees/
