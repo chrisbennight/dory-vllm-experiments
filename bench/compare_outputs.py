@@ -21,7 +21,9 @@ patched vLLM checkout), nvfp4-triton-fused-int8-head (the fused path's default
 INT8 LM head), nvfp4-triton-fused-ngram (the default fused path plus vLLM's
 prompt-lookup speculation) and nvfp4-triton-fused-wavefront (the default fused
 path plus Dory's wavefront decoding for a request decoding alone, which these
-one-at-a-time prompts always are).
+one-at-a-time prompts always are) and nvfp4-triton-last-loop (unmodified, with
+the model's shared "last_loop" KV cache: one cache per recurrent layer that
+every loop overwrites, instead of one per loop).
 
 With --reference, the configurations are compared with generations saved by
 an earlier run (its outputs_<configuration>.json) instead of with the first
@@ -134,6 +136,8 @@ CONFIGS = {
         "args": ["--speculative-config", json.dumps({
             "method": "ngram_gpu", "num_speculative_tokens": 4, "prompt_lookup_max": 4,
             "prompt_lookup_min": 2})]},
+    "nvfp4-triton-last-loop": {"attention": "TRITON_ATTN", "env": {},
+                               "overrides": {"recurrent_kv_cache_mode": "last_loop"}},
     "nvfp4-triton-fused-wavefront": {
         "attention": "TRITON_ATTN", "env": {"DORY_FUSED_DECODE": str(ROOT / "kernels"),
                                             "DORY_LM_HEAD_8BIT": "int8"},

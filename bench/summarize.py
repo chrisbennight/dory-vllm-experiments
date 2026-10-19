@@ -26,6 +26,7 @@ def load_rows(run_dir: Path) -> tuple[dict, list[dict]]:
                 + (f" + {manifest['dory_lm_head_8bit'].upper()} LM head"
                    if manifest.get("dory_lm_head_8bit") not in (None, "none") else "")
                 + (" + wavefront" if manifest.get("wavefront_decode") else "")
+                + (" (last-loop KV)" if manifest.get("kv_cache_mode") == "last_loop" else "")
                 + (" (V1 model runner)" if manifest.get("vllm_use_v2_model_runner") == "0"
                    else "")
                 + (" (no async scheduling)" if manifest.get("async_scheduling") is False

@@ -1127,3 +1127,38 @@ unchanged.
   single-user rows and the 128/1024 rows, this work's targets and guards, are
   not affected. Differences in batched results require a repeat run before they can
   be attributed to a code change.
+
+### E24: Dory's shared "last_loop" KV cache against per-loop caches (2026-10-19) - measured
+
+- **Goal:** WaveFront Decoding reports large gains from cross-recurrence KV
+  sharing (one KV cache shared by the loops) as an optional, approximate
+  extension, and Dory supports a form of it natively (`recurrent_kv_cache_mode:
+  "last_loop"`: one cache per recurrent layer that every loop overwrites). This
+  work used per-loop caches throughout. Before any engine work, measure what
+  the shared cache does to quality and serving on its own.
+- **Change:** `nvfp4-triton-last-loop` in `bench/compare_outputs.py` (also
+  used by `bench/eval_tasks.py`), and `bench/run_baseline.py --kv-cache-mode`.
+- **Measured** (unmodified vLLM, Triton attention, 4 loops, against per-loop
+  caches):
+  - Greedy agreement with the per-loop reference
+    ([results/output_agreement_20261019T104639Z/report.md](results/output_agreement_20261019T104639Z/report.md)):
+    no divergent token outside the top 5; 6 of 64 outputs identical, 104 shared
+    tokens on average. Over the 5056 positions every configuration shares, the
+    mean |logprob difference| is 0.0078, against 0.0066 for the FlashInfer floor,
+    0.0062 for the fused path and 0.0062 for the wavefront.
+  - Tasks ([results/task_eval_20261019T105029Z/report.md](results/task_eval_20261019T105029Z/report.md)):
+    GSM8K 91.2% against 90.8% (250 problems, McNemar p = 1.00), MMLU 62.7%
+    against 62.3% (1000 questions, p = 0.29), same MMLU answer letter for 98.9%
+    of questions.
+  - Serving (20261019T111134Z against 20261019T003224Z): KV cache 173,814
+    tokens against 65,169 (2.67x). One user unchanged (99.9 against 99.6 tok/s
+    at 128/1024, 84.6 against 84.4 at 2560/300) and 16 users unchanged; 64
+    users 1889.5 against 1583.8 tok/s at 128/1024 (+19%, median time to first
+    token 277 ms against 1204 ms) and 637.8 against 419.2 at 2560/300 (+52%,
+    3.5 s against 23.9 s).
+- **Decision:** the shared cache costs no measurable task quality and lifts
+  every KV-limited row, so it goes into docs/FUTURE_WORK.md with the wavefront
+  and fused path on a shared cache as next steps. It changes predictions more
+  than the accuracy gate's floor allows for kernel changes, as expected from a
+  different cache semantics, so it stays a deployment choice rather than a
+  default.

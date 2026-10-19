@@ -261,6 +261,9 @@ def main() -> int:
     parser.add_argument("--shapes", nargs="+", default=[f"{i}/{o}" for i, o in SHAPES],
                         choices=[f"{i}/{o}" for i, o in SHAPES],
                         help="run only these input/output lengths")
+    parser.add_argument("--kv-cache-mode", default="per_loop", choices=["per_loop", "last_loop"],
+                        help="the recurrent block's KV cache: one per loop (the model card's "
+                             "default) or one per layer that every loop overwrites")
     parser.add_argument("--wavefront", action="store_true",
                         help="Dory's wavefront decoding for a request decoding alone (needs "
                              "DORY_FUSED_DECODE and the patched vLLM checkout)")
@@ -277,7 +280,7 @@ def main() -> int:
         "gpu": gpu_snapshot(),
         "shapes": SHAPES,
         "concurrency_prompts": CONCURRENCY_PROMPTS,
-        "kv_cache_mode": "per_loop",
+        "kv_cache_mode": args.kv_cache_mode,
         "attention_backend": args.attention_backend,
         "server_env_overrides": SERVER_ENV,
         "cuda_home": os.environ.get("CUDA_HOME"),
@@ -309,8 +312,9 @@ def main() -> int:
         server = start_server(variant, loops, args.attention_backend,
                               run_dir / f"server_{tag}.log",
                               async_scheduling=not args.no_async_scheduling,
-                              extra_overrides={"wavefront_decode": True} if args.wavefront
-                              else None)
+                              extra_overrides={"recurrent_kv_cache_mode": args.kv_cache_mode,
+                                               **({"wavefront_decode": True}
+                                                  if args.wavefront else {})})
         try:
             wait_until_ready(server)
             log(f"server ready: {tag}; capturing reference outputs")
