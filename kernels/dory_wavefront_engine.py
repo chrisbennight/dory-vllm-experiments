@@ -76,8 +76,9 @@ logger = init_logger(f"vllm.{__name__}")
 # Steps between progress lines in the server log.
 LOG_EVERY = 2000
 # "1" makes every step a catch-up step, which computes vLLM's token from
-# scratch with the same kernels: the reference that steady steps must match
-# token for token under greedy decoding.
+# scratch with the same kernels. Per-loop steady steps must match this
+# reference; shared-cache steady steps can differ because they approximate
+# sequential decoding.
 FORCE_CATCH_UP = os.environ.get("DORY_WAVEFRONT_FORCE_CATCH_UP") == "1"
 
 

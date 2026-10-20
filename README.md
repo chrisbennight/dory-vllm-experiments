@@ -177,6 +177,15 @@ Turn it on with `"recurrent_kv_cache_mode": "last_loop"` in `--hf-overrides`
 against sequential decoding; which to serve is a deployment choice. Details:
 EXPERIMENTS.md E24 and E25, docs/BENCHMARKS.md section 5.
 
+The original 64-prompt agreement gate stayed below 1,024 tokens. A separate
+[window-boundary validation](results/window_agreement_20261020/report.md)
+matches prefill chunks and token histories against contiguous attention.
+It confirms that shared-cache prefill chunks change the computation. In these
+tests, per-loop wavefront logits match the forced catch-up control exactly;
+the 4-loop shared-cache wavefront changes the distribution and agrees on
+633 of 635 top-token predictions. This numerical check does not establish
+long-context task accuracy.
+
 ### 4. vLLM changes
 
 [`patches/vllm-dory-fused-decode.patch`](patches/README.md) (6 files, against
@@ -208,6 +217,9 @@ path now handles those runs.
 - `bench/compare_outputs.py`, `bench/common_prefix_delta.py` and
   `bench/eval_tasks.py`: the accuracy gate (greedy agreement and
   log-probability drift against a noise floor) and GSM8K/MMLU checks.
+- `bench/window_agreement.py` and `bench/window_attention_audit.py`: matched
+  histories and prefill chunks across the sliding window, plus direct cache
+  and FP64 attention checks on the engine's actual query/key/value inputs.
 - Studies: attention backends (with a FlexAttention fix,
   `patches/vllm-flex-attention-pr57300-port.patch`), quantizations, the cost of
   kernel launches (E13), vLLM's n-gram speculation (E14), how often Dory's
@@ -226,7 +238,7 @@ git -C src/vllm apply ../../patches/vllm-dory-fused-decode.patch
 
 # Serve with the fused path and wavefront decoding at 4 loops. "per_loop"
 # keeps one KV cache per loop (exact); "last_loop" shares one (faster, 2.7x the
-# KV capacity, approximate within the accuracy gate's noise floor).
+# KV capacity, approximate; see the window-boundary validation above).
 DORY_FUSED_DECODE=$PWD/kernels VLLM_USE_FLASHINFER_SAMPLER=0 \
   .venv/bin/vllm serve models/nvfp4 --attention-backend TRITON_ATTN \
   --async-scheduling --hf-overrides \

@@ -496,6 +496,38 @@ logits, so drafting preserves the sequential decoder's sampling distribution
 apart from numerical differences. On the shared cache, the full-depth logits
 also reflect the approximation described in section 5.
 
+### Agreement across the sliding window
+
+The 64-prompt agreement gate above has prompt lengths of 23 to 42 tokens and
+never reaches the 1,024-token sliding window. The separate
+[controlled validation](../results/window_agreement_20261020/report.md)
+completed 44 jobs with matched token histories, recorded prefill chunks,
+contiguous PyTorch attention references, and single-request generation across
+the boundary. These are numerical measurements, separate from task accuracy.
+
+With 2 loops and the same FP32 reference weights, changing only prefill from
+one chunk to individual tokens gives full-vocabulary log-probability RMS
+differences of 0.66807 on shared KV and 0.00002 on per-loop KV, on the tested
+1,100-token random prompt and fixed continuations. Shared-cache chunking
+therefore changes the reference computation itself.
+
+The NVFP4 wavefront comparison against forced catch-up uses 635 decode
+positions per configuration, including natural and random text on both sides
+of the window:
+
+| Loops | KV cache | RMS difference in log probability | Same top-token prediction |
+|---:|---|---:|---:|
+| 2 | per-loop | 0 | 635/635 |
+| 4 | per-loop | 0 | 635/635 |
+| 2 | shared | 0 | 635/635 |
+| 4 | shared | 0.44511 | 633/635 |
+
+The four-loop shared-cache wavefront is an approximation. Neither high
+top-token agreement nor low task-score differences establish identical
+sampling distributions. The report includes matched FP32 controls, direct
+cache checks, total variation, and the limits of this comparison with the
+upstream H100/FP64 report.
+
 ## 7. Complete serving suite, 1 to 64 users
 
 All configurations below use NVFP4 and disable prefix caching. "Fused path"

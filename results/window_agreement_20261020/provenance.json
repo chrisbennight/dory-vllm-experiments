@@ -1,0 +1,863 @@
+{
+  "vllm_pr_sha": "55076950b6c155f384d6766d63563c3bc20a0e3f",
+  "model_revisions": {
+    "bf16": "b366b87f762ea334ba3eb55912031baba1515810",
+    "mxfp8": "f35880f52368271136b48e3a4365f91e70a92308",
+    "nvfp4": "41f02335e1a1ad3289b8b32485e2265cbe97cfdf"
+  },
+  "gpu": {
+    "name": "NVIDIA GeForce RTX 4090",
+    "driver": "595.99.02",
+    "memory_used_mib": "655",
+    "memory_total_mib": "24564",
+    "utilization_pct": "0",
+    "temperature_c": "45",
+    "power_limit_w": "450.00",
+    "max_sm_clock_mhz": "3135",
+    "compute_apps": []
+  },
+  "upstream_dory_sha256": "0b0a72da01fb0834679e2578741dc29bcc43d75c369a54d2a72f740b54696dad",
+  "harness_sha256": "98561549fd1bfd9cd1527e670056127eb0660763c06e9a4eeb1c16ccc8429d2f",
+  "resumes": [
+    {
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67",
+      "gpu": {
+        "name": "NVIDIA GeForce RTX 4090",
+        "driver": "595.99.02",
+        "memory_used_mib": "651",
+        "memory_total_mib": "24564",
+        "utilization_pct": "0",
+        "temperature_c": "43",
+        "power_limit_w": "450.00",
+        "max_sm_clock_mhz": "3135",
+        "compute_apps": []
+      }
+    }
+  ],
+  "runtime_versions": {
+    "torch": "2.14.0",
+    "triton": "3.8.0",
+    "transformers": "5.19.0",
+    "safetensors": "0.8.0"
+  },
+  "completed_jobs": [
+    {
+      "state": "finished",
+      "job": 1,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "bf16",
+        "--loops",
+        "1",
+        "--mode",
+        "per_loop",
+        "--variant",
+        "upstream"
+      ],
+      "exit_code": 0
+    },
+    {
+      "state": "finished",
+      "job": 2,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "1",
+        "--mode",
+        "per_loop",
+        "--reference-dtype",
+        "bfloat16"
+      ],
+      "exit_code": 0
+    },
+    {
+      "state": "finished",
+      "job": 3,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "1",
+        "--mode",
+        "per_loop",
+        "--reference-dtype",
+        "float32"
+      ],
+      "exit_code": 0
+    },
+    {
+      "state": "finished",
+      "job": 4,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "bf16",
+        "--loops",
+        "1",
+        "--mode",
+        "last_loop",
+        "--variant",
+        "upstream"
+      ],
+      "exit_code": 0
+    },
+    {
+      "state": "finished",
+      "job": 5,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "1",
+        "--mode",
+        "last_loop",
+        "--reference-dtype",
+        "bfloat16"
+      ],
+      "exit_code": 0
+    },
+    {
+      "state": "finished",
+      "job": 6,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "1",
+        "--mode",
+        "last_loop",
+        "--reference-dtype",
+        "float32"
+      ],
+      "exit_code": 0
+    },
+    {
+      "state": "finished",
+      "job": 7,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "per_loop",
+        "--variant",
+        "upstream"
+      ],
+      "exit_code": 0
+    },
+    {
+      "state": "finished",
+      "job": 8,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "per_loop",
+        "--reference-dtype",
+        "bfloat16"
+      ],
+      "exit_code": 0
+    },
+    {
+      "state": "finished",
+      "job": 9,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "per_loop",
+        "--reference-dtype",
+        "float32"
+      ],
+      "exit_code": 0
+    },
+    {
+      "state": "finished",
+      "job": 10,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "per_loop",
+        "--reference-dtype",
+        "float32",
+        "--prefill",
+        "token"
+      ],
+      "exit_code": 0
+    },
+    {
+      "state": "finished",
+      "job": 11,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "per_loop",
+        "--chunk",
+        "512",
+        "--variant",
+        "upstream"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 12,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "per_loop",
+        "--chunk",
+        "512",
+        "--reference-dtype",
+        "float32"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 13,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "per_loop",
+        "--dtype",
+        "float32",
+        "--variant",
+        "upstream"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 14,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "per_loop",
+        "--dtype",
+        "float32",
+        "--reference-dtype",
+        "float32"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 15,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "last_loop",
+        "--variant",
+        "upstream"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 16,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "last_loop",
+        "--reference-dtype",
+        "bfloat16"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 17,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "last_loop",
+        "--reference-dtype",
+        "float32"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 18,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "last_loop",
+        "--reference-dtype",
+        "float32",
+        "--prefill",
+        "token"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 19,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "last_loop",
+        "--chunk",
+        "512",
+        "--variant",
+        "upstream"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 20,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "last_loop",
+        "--chunk",
+        "512",
+        "--reference-dtype",
+        "float32"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 21,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "last_loop",
+        "--dtype",
+        "float32",
+        "--variant",
+        "upstream"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 22,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "2",
+        "--mode",
+        "last_loop",
+        "--dtype",
+        "float32",
+        "--reference-dtype",
+        "float32"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 23,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "bf16",
+        "--loops",
+        "4",
+        "--mode",
+        "per_loop",
+        "--variant",
+        "upstream"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 24,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "4",
+        "--mode",
+        "per_loop",
+        "--reference-dtype",
+        "bfloat16"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 25,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "4",
+        "--mode",
+        "per_loop",
+        "--reference-dtype",
+        "float32"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 26,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "bf16",
+        "--loops",
+        "4",
+        "--mode",
+        "last_loop",
+        "--variant",
+        "upstream"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 27,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "4",
+        "--mode",
+        "last_loop",
+        "--reference-dtype",
+        "bfloat16"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 28,
+      "total": 44,
+      "argv": [
+        "reference",
+        "--model",
+        "bf16",
+        "--loops",
+        "4",
+        "--mode",
+        "last_loop",
+        "--reference-dtype",
+        "float32"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 29,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "2",
+        "--mode",
+        "per_loop",
+        "--variant",
+        "upstream"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 30,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "2",
+        "--mode",
+        "per_loop",
+        "--variant",
+        "fused"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 31,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "2",
+        "--mode",
+        "per_loop",
+        "--variant",
+        "catchup"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 32,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "2",
+        "--mode",
+        "per_loop",
+        "--variant",
+        "wavefront"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 33,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "2",
+        "--mode",
+        "last_loop",
+        "--variant",
+        "upstream"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 34,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "2",
+        "--mode",
+        "last_loop",
+        "--variant",
+        "fused"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 35,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "2",
+        "--mode",
+        "last_loop",
+        "--variant",
+        "catchup"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 36,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "2",
+        "--mode",
+        "last_loop",
+        "--variant",
+        "wavefront"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 37,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "4",
+        "--mode",
+        "per_loop",
+        "--variant",
+        "upstream"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 38,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "4",
+        "--mode",
+        "per_loop",
+        "--variant",
+        "fused"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 39,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "4",
+        "--mode",
+        "per_loop",
+        "--variant",
+        "catchup"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 40,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "4",
+        "--mode",
+        "per_loop",
+        "--variant",
+        "wavefront"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 41,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "4",
+        "--mode",
+        "last_loop",
+        "--variant",
+        "upstream"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 42,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "4",
+        "--mode",
+        "last_loop",
+        "--variant",
+        "fused"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 43,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "4",
+        "--mode",
+        "last_loop",
+        "--variant",
+        "catchup"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    },
+    {
+      "state": "finished",
+      "job": 44,
+      "total": 44,
+      "argv": [
+        "engine",
+        "--model",
+        "nvfp4",
+        "--loops",
+        "4",
+        "--mode",
+        "last_loop",
+        "--variant",
+        "wavefront"
+      ],
+      "exit_code": 0,
+      "harness_sha256": "eadb2b812ed91da68983f1067247d99b5e014c0434f00c47b10ed0fff9b65b67"
+    }
+  ],
+  "validation": {
+    "jobs_passed": 44,
+    "raw_logit_arrays_finite": 212,
+    "single_loop_cache_mode_logits_bitwise_equal": true,
+    "comparison_rows": 184,
+    "exact_wavefront_controls": [
+      "2-loop per_loop",
+      "4-loop per_loop",
+      "2-loop last_loop"
+    ],
+    "attention_calls_checked": 21504,
+    "attention_cache_entry_mismatches": 0,
+    "attention_audits_leave_engine_logits_bitwise_unchanged": true
+  },
+  "current_harness_sha256": "fa8b712c1fd6c2dbc8c760e29bbf8ed2d229ca916885b68665e6bdb946654461",
+  "attention_audit_harness_sha256": "2f72778aded5d0932ab6ece7e97ff3be26b51a05c2bd6a30af03da76ddebe4cc"
+}
