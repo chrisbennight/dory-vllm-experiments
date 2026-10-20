@@ -1222,3 +1222,74 @@ unchanged.
   cache it is the fastest single-user configuration measured (3.2 times vLLM as
   shipped at 4 loops), with quality within the gate's noise floor. Which mode
   to serve is a deployment choice (docs/FUTURE_WORK.md).
+
+### E26: complete serving suite with independent prompt processing (2026-10-20) - measured
+
+- **Goal:** finish the serving comparison across loop counts, cache modes and
+  intermediate batch sizes, including the 2-loop shared-cache wavefront.
+- **Method correction:** every `vllm bench serve --seed 0` invocation draws
+  the same random prompts. With prefix caching enabled on a reused server,
+  later benchmarks reuse earlier prompt processing. The first expanded suite
+  reached a cumulative prefix-cache hit rate of 73%. This inflated output
+  throughput and shortened time to first token for prompt-heavy batches,
+  explaining the long-prompt variation recorded in E23. At 2 loops and 16
+  users with Triton, 2560/300 measured 849.2 tok/s with prefix caching
+  (`results/20261019T132848Z`) and 655.4 with it disabled in the verification
+  run (`results/20261019T143123Z`). This does not establish the cause of the
+  separate single-user wavefront order effect.
+- **Change:** the serving harness disables prefix caching by default,
+  `--prefix-caching` restores it explicitly, and the manifest records the
+  setting. The suite uses NVFP4, loop counts 1, 2 and 4, shapes 128/1024 and
+  2560/300, and 1, 2, 4, 8, 16, 32 and 64 users. Those levels measure 8, 8,
+  16, 32, 64, 128 and 128 requests, with two warm-up requests before each row.
+  All benchmarks run sequentially on the idle-checked RTX 4090, long prompts
+  before short prompts, with the same software, model revisions and sampler.
+- **Completed runs:**
+
+  | Configuration | Loops | Run |
+  |---|---|---|
+  | vLLM as shipped, per-loop KV | 1, 2, 4 | 20261019T152606Z |
+  | Triton, per-loop KV | 1, 2, 4 | 20261019T232759Z |
+  | Triton, shared KV | 2, 4 | 20261019T160704Z |
+  | Fused, BF16 head, per-loop KV | 1, 2, 4 | 20261020T002938Z |
+  | Fused, INT8 head, per-loop KV | 1, 2, 4 | 20261020T010402Z |
+  | Fused, INT8 head, shared KV | 2, 4 | 20261020T000323Z |
+  | Fused and wavefront, per-loop KV | 2, 4 | 20261019T143422Z |
+  | Fused and wavefront, shared KV | 2 | 20261020T015236Z |
+  | Fused and wavefront, shared KV | 4 | 20261019T150009Z |
+
+- **Validation:** 20 configurations, 280 benchmark rows, 15,360 successful
+  measured requests, no failed requests. The table publisher checks the
+  complete matrix, request counts, disabled prefix caching, cache and head
+  settings, software, model revisions, GPU driver and sampler before writing
+  tables. No model or kernel code changed; the quality evaluations in E25
+  still apply to the same implementation.
+- **Measured:**
+  - One user with all applicable features: 318.8 tok/s at 1 loop, 264.1 at
+    2 loops and 243.4 at 4 loops for 128/1024, respectively 69%, 107% and
+    212% above vLLM as shipped. At 2560/300 the corresponding rates are
+    264.9, 208.7 and 168.2 tok/s (74%, 102% and 169% above shipped).
+  - Shared KV adds about 5% over per-loop wavefront at 2 loops, and 25% at
+    128/1024 or 17% at 2560/300 at 4 loops. With 64 users at 4 loops,
+    shared-cache wavefront is 20% and 14% faster than per-loop wavefront;
+    earlier larger long-prompt gains included prefix reuse.
+  - The wavefront still runs only for a request decoding alone. At 4 loops
+    with shared KV and 128/1024, one user gets 243.4 tok/s, but two users
+    together get 192.8, about 96.4 each. Small-batch wavefront pipelines remain
+    a useful next step.
+  - In the per-loop, 4-loop, 64-user, 128/1024 row, the fused configurations
+    are 2.1 to 2.7% slower than unmodified Triton. This exceeds the original
+    2% batch target: the duplicated weights reduce the cache from 65,180 to
+    56,966 tokens. Shared KV holds 173,814 tokens unmodified and 151,915 with
+    fused weights and avoids this capacity limit. This benchmark update
+    records the limitation; it does not change the weight layout.
+  - The operator confirmed a concurrent workload during the earlier 2-loop
+    shared-cache wavefront configuration. Its measurements are excluded. The
+    entire configuration is replaced by a clean run; the independently measured
+    4-loop configuration is retained. In the replacement, all rows with multiple
+    users agree with unmodified Triton on the same cache within 0.4%.
+- **Publication:** the README headline and the feature, final and shared-cache
+  tables now use the corrected suite. New tables show every concurrency
+  level. Backend, quantization and early development-history comparisons keep
+  their original measurements and are explicitly labeled as using prefix
+  caching. Earlier experiment entries retain what was measured at the time.

@@ -17,7 +17,7 @@ quality at the cost of more computation. This work reduces decoding time with:
   keeps several tokens in flight at different loop depths;
 - **Dory's shared KV cache**: one key/value cache per recurrent layer shared by
   all loops (the WaveFront paper's cross-recurrence KV sharing), which makes
-  drafts match more often and holds 2.3 times as many tokens;
+  drafts match more often and holds about 2.7 times as many tokens at 4 loops;
 - the **vLLM changes** that let a model run its own decode step inside the V2
   model runner without changing batched serving.
 
@@ -30,28 +30,34 @@ the later columns measure the changes in this repository:
 <!-- table:headline -->
 | Loops | Input/output | vLLM as shipped | + Triton attention | + fused decode path | + INT8 LM head | + wavefront | + shared KV cache | Total |
 |---:|---|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 128/1024 | 188.8 | 234.8 (+24%) | 286.3 (+22%) | 318.6 (+11%) | n/a | n/a | +69% |
-| 1 | 2560/300 | 154.7 | 201.9 (+31%) | 244.9 (+21%) | 268.7 (+10%) | n/a | n/a | +74% |
-| 2 | 128/1024 | 128.1 | 161.7 (+26%) | 200.3 (+24%) | 215.7 (+8%) | 250.8 (+16%) | pending | +96% |
-| 2 | 2560/300 | 104.3 | 138.0 (+32%) | 169.2 (+23%) | 180.8 (+7%) | 201.8 (+12%) | pending | +94% |
-| 4 | 128/1024 | 77.9 | 99.6 (+28%) | 125.7 (+26%) | 131.1 (+4%) | 184.5 (+41%) | 248.4 (+35%) | +219% |
-| 4 | 2560/300 | 63.2 | 84.4 (+34%) | 105.8 (+25%) | 109.3 (+3%) | 147.2 (+35%) | 172.9 (+17%) | +174% |
+| 1 | 128/1024 | 188.2 | 234.8 (+25%) | 286.2 (+22%) | 318.8 (+11%) | n/a | n/a | +69% |
+| 1 | 2560/300 | 152.2 | 199.1 (+31%) | 241.7 (+21%) | 264.9 (+10%) | n/a | n/a | +74% |
+| 2 | 128/1024 | 127.7 | 161.9 (+27%) | 200.3 (+24%) | 215.3 (+7%) | 251.0 (+17%) | 264.1 (+5%) | +107% |
+| 2 | 2560/300 | 103.3 | 136.3 (+32%) | 167.2 (+23%) | 177.3 (+6%) | 197.9 (+12%) | 208.7 (+5%) | +102% |
+| 4 | 128/1024 | 78.0 | 99.8 (+28%) | 125.7 (+26%) | 131.1 (+4%) | 194.2 (+48%) | 243.4 (+25%) | +212% |
+| 4 | 2560/300 | 62.5 | 83.4 (+33%) | 104.0 (+25%) | 107.7 (+4%) | 143.9 (+34%) | 168.2 (+17%) | +169% |
 <!-- /table -->
+
+The headline measurements disable prefix caching, so each benchmark processes
+its own prompts. The full suite covers 1, 2, 4, 8, 16, 32 and 64 concurrent users;
+[Benchmarks](docs/BENCHMARKS.md) also labels the older backend, quantization and
+development-history tables that used prefix caching.
 
 These measurements use random-token prompts, which are harder to draft than
 the chat prompts tested here. Separate in-process tests on chat prompts at 4
 loops reached 259 tok/s with sampling and 265 tok/s with greedy decoding on the
-shared KV cache (240 and 261 tok/s with per-loop caches). The 2-loop
-shared-cache run is part of a benchmark suite still in progress.
+shared KV cache (240 and 261 tok/s with per-loop caches).
 
 With 16 and 64 users, vLLM continues to use its batched kernels. The fused path
 keeps an extra copy of the weights, leaving less memory for the key/value (KV)
-cache. This costs about 1 to 2% throughput in the 4-loop, 64-user, 128/1024
+cache. This costs about 2 to 3% throughput in the 4-loop, 64-user, 128/1024
 case, where the cache fills up. The shared KV cache more than makes up for
-it: at 4 loops it holds 2.3 times as many tokens, and 64-user throughput rises
-19 to 52% over per-loop caches. The batched 2560-token rows also vary by up to
-11% between runs of the same configuration; the cause is unknown. See
-[Benchmarks](docs/BENCHMARKS.md) for the full results and caveats.
+it: at 4 loops it holds about 2.7 times as many tokens at the same weight layout.
+In the corrected wavefront runs, shared KV raises 64-user throughput by 20%
+at 128/1024 and 14% at 2560/300 over per-loop KV. Earlier long-prompt results
+were inflated by reuse of prompt prefixes across benchmarks; the corrected
+suite disables that cache. See [Benchmarks](docs/BENCHMARKS.md) for the full
+results and caveats.
 
 ## What was built
 
@@ -124,8 +130,8 @@ the model's own decode step whenever one request decodes alone:
   from scratch with the same kernels. Differences from unmodified vLLM stayed
   within the accuracy check's noise floor.
 
-**Gain for one user** over the fused path with the INT8 head: 12 to 16% at 2
-loops and 35 to 41% at 4 loops on the benchmark's random-token prompts; at 4
+**Gain for one user** over the fused path with the INT8 head: 12 to 17% at 2
+loops and 34 to 48% at 4 loops on the benchmark's random-token prompts; at 4
 loops on chat prompts, 77% with temperature 1 and top-p 0.95 and 91% greedy.
 It needs at least two loops.
 
@@ -158,11 +164,13 @@ extension that raised draft acceptance on Huginn-3.5B from 0.88 to 0.98.
   backends), and GSM8K (92.0% against 91.2%) and MMLU (62.7%) are unchanged.
 - **Gain:** drafts match more often (vLLM samples 96% of them on random-token
   prompts, against 87 to 92% with per-loop caches, and 97% against 94.5% on
-  chat prompts with sampling). At 4 loops one user reaches 248.4 tok/s at
-  128/1024 and 172.9 at 2560/300, 35% and 17% over the wavefront with
-  per-loop caches and 3.2 and 2.7 times vLLM as shipped. The cache holds
+  chat prompts with sampling). In the corrected suite, at 4 loops one user
+  reaches 243.4 tok/s at 128/1024 and 168.2 at 2560/300, 25% and 17% over
+  the wavefront with per-loop caches and 3.1 and 2.7 times vLLM as shipped.
+  At 2 loops it reaches 264.1 and 208.7 tok/s, about 5% over per-loop wavefront.
+  The cache holds
   151,915 tokens with the fused path (56,966 per-loop), so the 64-user rows gain
-  19% (128/1024) and 52% (2560/300).
+  20% (128/1024) and 14% (2560/300) against the per-loop wavefront.
 
 Turn it on with `"recurrent_kv_cache_mode": "last_loop"` in `--hf-overrides`
 (see Reproduce). Per-loop caches remain available and keep the wavefront exact
@@ -194,7 +202,7 @@ path now handles those runs.
 ### 5. Measurement tools
 
 - `bench/run_baseline.py`: the serving matrix (formats, loops, two prompt
-  shapes, 1/16/64 users) on an idle GPU, with manifests of every setting.
+  shapes, 1/2/4/8/16/32/64 users) on an idle GPU, with manifests of every setting.
 - `bench/profile_decode.py` and `bench/gap_analysis.py`: per-kernel decode
   profiles against the bandwidth minimum.
 - `bench/compare_outputs.py`, `bench/common_prefix_delta.py` and
@@ -217,7 +225,7 @@ bench/download_models.sh                 # BF16, MXFP8 and NVFP4 checkpoints
 git -C src/vllm apply ../../patches/vllm-dory-fused-decode.patch
 
 # Serve with the fused path and wavefront decoding at 4 loops. "per_loop"
-# keeps one KV cache per loop (exact); "last_loop" shares one (faster, 2.3x the
+# keeps one KV cache per loop (exact); "last_loop" shares one (faster, 2.7x the
 # KV capacity, approximate within the accuracy gate's noise floor).
 DORY_FUSED_DECODE=$PWD/kernels VLLM_USE_FLASHINFER_SAMPLER=0 \
   .venv/bin/vllm serve models/nvfp4 --attention-backend TRITON_ATTN \
@@ -226,7 +234,8 @@ DORY_FUSED_DECODE=$PWD/kernels VLLM_USE_FLASHINFER_SAMPLER=0 \
 
 # The benchmarks of docs/BENCHMARKS.md.
 DORY_FUSED_DECODE=$PWD/kernels .venv/bin/python bench/run_baseline.py \
-  --variants nvfp4 --loops 4 --attention-backend TRITON_ATTN --wavefront
+  --variants nvfp4 --loops 2 4 --attention-backend TRITON_ATTN --wavefront \
+  --kv-cache-mode last_loop
 .venv/bin/python -I bench/compare_outputs.py --loops 4 nvfp4-triton \
   nvfp4-triton-fused-wavefront nvfp4-triton-fused-int8-head nvfp4-flashinfer
 ```
@@ -234,6 +243,8 @@ DORY_FUSED_DECODE=$PWD/kernels .venv/bin/python bench/run_baseline.py \
 - Without `DORY_FUSED_DECODE` the patched vLLM behaves as before; without
   `wavefront_decode` the fused path runs alone. `DORY_LM_HEAD_8BIT=none`
   restores vLLM's BF16 LM head.
+- The serving benchmark disables prefix caching by default; `--prefix-caching`
+  restores it for workloads intended to measure prompt reuse.
 - Drafts match vLLM's samples only with vLLM's own Gumbel sampler
   (`VLLM_USE_FLASHINFER_SAMPLER=0`); with FlashInfer's sampler the outputs are
   still correct, but drafts match less often.

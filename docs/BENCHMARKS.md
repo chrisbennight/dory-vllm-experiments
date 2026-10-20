@@ -11,7 +11,8 @@ All measurements come from one machine using the benchmark tools in `bench/`.
 - **Software:** vLLM at the head of the Dory support pull request
   ([vllm#60149](https://github.com/vllm-project/vllm/pull/60149), commit
   `55076950`), torch 2.14.0+cu130, V2 model runner, asynchronous scheduling,
-  per-loop KV cache, `max_model_len` 8192, `gpu_memory_utilization` 0.90.
+  per-loop or shared KV cache as labeled, `max_model_len` 8192,
+  `gpu_memory_utilization` 0.90.
 - **Model:** NVIDIA-Nemotron-Labs-Dory1.0-4B in its three official
   quantizations (BF16, MXFP8, NVFP4) at pinned revisions
   (`bench/download_models.sh`). "Loops" is `n_recurrent_loops`, how many times
@@ -19,18 +20,27 @@ All measurements come from one machine using the benchmark tools in `bench/`.
   quality at the cost of more computation.
 - **Workload:** `vllm bench serve` with random-token prompts, in the two shapes
   of NVIDIA's DGX Spark table: 128 input / 1024 output tokens and 2560 / 300.
-  1, 16 and 64 concurrent users (8, 64 and 128 requests), sampled with the
-  model's defaults (temperature 1, top-p 0.95).
+  1, 2, 4, 8, 16, 32 and 64 concurrent users (8, 8, 16, 32, 64, 128 and
+  128 requests), sampled with the model's defaults (temperature 1, top-p 0.95).
+- **Prefix caching:** disabled in the corrected serving suite. Every benchmark
+  uses seed 0, so keeping a server's prefix cache across benchmarks lets later
+  rows reuse earlier prompts. The headline, feature, final, shared-cache and
+  complete-suite tables use the corrected runs. The older attention-backend,
+  quantization and development-history tables retain their original runs,
+  which had prefix caching enabled.
 - **Values:** total output tokens per second, so with one user it is that
   user's speed. Runs are strictly one at a time on an idle GPU (the harness
-  refuses to start otherwise). Repeated runs generally agree to about 0.2%.
-  Exceptions include rows limited by KV cache capacity, long-prompt batches
-  and a wavefront result that depends on benchmark order; see Caveats below.
+  refuses to start otherwise). The complete serving suite does not estimate
+  uncertainty for every row. Cache-limited rows are discussed below. An earlier
+  2-loop shared-cache wavefront run had a concurrent workload, confirmed by
+  the operator; it is excluded and replaced by a complete clean run.
 
 ## 1. vLLM's attention backends
 
 Unmodified vLLM with the NVFP4 checkpoint. vLLM picks FlashAttention by
 default; Triton and FlashInfer are selected with `--attention-backend`.
+These historical runs had prefix caching enabled; their prompt-heavy batch
+results should not be compared directly with the corrected suite below.
 
 ### 1 loop
 
@@ -93,6 +103,8 @@ Runs: 20261018T045319Z, 20261018T114127Z, 20261018T130843Z.
 
 The three official checkpoints on unmodified vLLM with Triton attention;
 "Change" is NVFP4 against BF16.
+These historical runs had prefix caching enabled, as did the default-backend
+comparison below.
 
 ### 1 loop
 
@@ -204,27 +216,26 @@ previous column in parentheses. The fused decode column uses vLLM's BF16 LM
 head, allowing the next column to show the INT8 head's effect separately.
 Wavefront decoding requires at least two loops. The shared KV cache column runs
 the wavefront on Dory's shared KV cache (section 5); with one loop there is
-nothing to share, and "pending" marks a run of the benchmark suite still in
-progress.
+nothing to share. These tables use the corrected suite with prefix caching off.
 
 After the Triton column, batched rows continue to use vLLM's own kernels.
-Differences in those rows need care: the 2560/300 results at 16 and 64 users
-vary by up to 11% between runs of the same configuration (see Caveats), and
-the 4-loop, 64-user, 128/1024 case fills the KV cache (section 5).
+Differences in those rows need care: the 4-loop, 64-user, 128/1024 case fills
+the per-loop KV cache, while shared caching has room for the workload
+(section 5). Section 7 includes the intermediate concurrency levels.
 
 ### 1 loop
 
 <!-- table:steps-1 -->
 | Input/output | Users | vLLM as shipped | + Triton attention | + fused decode path | + INT8 LM head | + wavefront | + shared KV cache | Total |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| 128/1024 | 1 | 188.8 | 234.8 (+24%) | 286.3 (+22%) | 318.6 (+11%) | n/a | n/a | +69% |
-| 128/1024 | 16 | 2204.2 | 2523.5 (+14%) | 2524.3 (+0%) | 2531.8 (+0%) | n/a | n/a | +15% |
-| 128/1024 | 64 | 3453.5 | 4702.5 (+36%) | 4703.7 (+0%) | 4677.7 (-1%) | n/a | n/a | +35% |
-| 2560/300 | 1 | 154.7 | 201.9 (+31%) | 244.9 (+21%) | 268.7 (+10%) | n/a | n/a | +74% |
-| 2560/300 | 16 | 911.5 | 952.8 (+5%) | 954.2 (+0%) | 1058.5 (+11%) | n/a | n/a | +16% |
-| 2560/300 | 64 | 1312.1 | 1576.2 (+20%) | 1575.9 (-0%) | 1707.4 (+8%) | n/a | n/a | +30% |
+| 128/1024 | 1 | 188.2 | 234.8 (+25%) | 286.2 (+22%) | 318.8 (+11%) | n/a | n/a | +69% |
+| 128/1024 | 16 | 2201.1 | 2523.0 (+15%) | 2524.2 (+0%) | 2527.5 (+0%) | n/a | n/a | +15% |
+| 128/1024 | 64 | 3421.4 | 4648.9 (+36%) | 4628.7 (-0%) | 4637.5 (+0%) | n/a | n/a | +36% |
+| 2560/300 | 1 | 152.2 | 199.1 (+31%) | 241.7 (+21%) | 264.9 (+10%) | n/a | n/a | +74% |
+| 2560/300 | 16 | 956.3 | 996.5 (+4%) | 997.2 (+0%) | 996.9 (-0%) | n/a | n/a | +4% |
+| 2560/300 | 64 | 1055.5 | 1256.2 (+19%) | 1256.9 (+0%) | 1256.1 (-0%) | n/a | n/a | +19% |
 
-Runs: 20261018T045319Z, 20261018T114127Z, 20261019T023002Z, 20261019T024248Z.
+Runs: 20261019T152606Z, 20261019T232759Z, 20261020T002938Z, 20261020T010402Z.
 <!-- /table -->
 
 ### 2 loops
@@ -232,14 +243,14 @@ Runs: 20261018T045319Z, 20261018T114127Z, 20261019T023002Z, 20261019T024248Z.
 <!-- table:steps-2 -->
 | Input/output | Users | vLLM as shipped | + Triton attention | + fused decode path | + INT8 LM head | + wavefront | + shared KV cache | Total |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| 128/1024 | 1 | 128.1 | 161.7 (+26%) | 200.3 (+24%) | 215.7 (+8%) | 250.8 (+16%) | pending | +96% |
-| 128/1024 | 16 | 1488.2 | 1721.1 (+16%) | 1721.7 (+0%) | 1721.5 (-0%) | 1719.5 (-0%) | pending | +16% |
-| 128/1024 | 64 | 2281.0 | 3145.9 (+38%) | 3142.1 (-0%) | 3144.8 (+0%) | 3145.0 (+0%) | pending | +38% |
-| 2560/300 | 1 | 104.3 | 138.0 (+32%) | 169.2 (+23%) | 180.8 (+7%) | 201.8 (+12%) | pending | +94% |
-| 2560/300 | 16 | 661.3 | 697.2 (+5%) | 697.0 (-0%) | 696.5 (-0%) | 697.8 (+0%) | pending | +6% |
-| 2560/300 | 64 | 659.3 | 779.3 (+18%) | 776.8 (-0%) | 784.9 (+1%) | 784.7 (-0%) | pending | +19% |
+| 128/1024 | 1 | 127.7 | 161.9 (+27%) | 200.3 (+24%) | 215.3 (+7%) | 251.0 (+17%) | 264.1 (+5%) | +107% |
+| 128/1024 | 16 | 1485.4 | 1718.5 (+16%) | 1718.9 (+0%) | 1713.5 (-0%) | 1717.0 (+0%) | 1716.3 (-0%) | +16% |
+| 128/1024 | 64 | 2263.3 | 3108.3 (+37%) | 3104.2 (-0%) | 3100.2 (-0%) | 3111.1 (+0%) | 3103.2 (-0%) | +37% |
+| 2560/300 | 1 | 103.3 | 136.3 (+32%) | 167.2 (+23%) | 177.3 (+6%) | 197.9 (+12%) | 208.7 (+5%) | +102% |
+| 2560/300 | 16 | 627.8 | 655.7 (+4%) | 655.8 (+0%) | 654.4 (-0%) | 656.3 (+0%) | 654.4 (-0%) | +4% |
+| 2560/300 | 64 | 657.4 | 776.9 (+18%) | 774.0 (-0%) | 780.0 (+1%) | 782.1 (+0%) | 814.8 (+4%) | +24% |
 
-Runs: 20261018T045319Z, 20261018T180516Z, 20261018T185825Z, 20261018T190327Z, 20261019T022147Z.
+Runs: 20261019T143422Z, 20261019T152606Z, 20261019T232759Z, 20261020T002938Z, 20261020T010402Z, 20261020T015236Z.
 <!-- /table -->
 
 ### 4 loops
@@ -247,14 +258,14 @@ Runs: 20261018T045319Z, 20261018T180516Z, 20261018T185825Z, 20261018T190327Z, 20
 <!-- table:steps-4 -->
 | Input/output | Users | vLLM as shipped | + Triton attention | + fused decode path | + INT8 LM head | + wavefront | + shared KV cache | Total |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| 128/1024 | 1 | 77.9 | 99.6 (+28%) | 125.7 (+26%) | 131.1 (+4%) | 184.5 (+41%) | 248.4 (+35%) | +219% |
-| 128/1024 | 16 | 903.2 | 1049.0 (+16%) | 1050.9 (+0%) | 1048.4 (-0%) | 1049.7 (+0%) | 1050.9 (+0%) | +16% |
-| 128/1024 | 64 | 1164.7 | 1583.8 (+36%) | 1573.4 (-1%) | 1563.4 (-1%) | 1566.8 (+0%) | 1890.7 (+21%) | +62% |
-| 2560/300 | 1 | 63.2 | 84.4 (+34%) | 105.8 (+25%) | 109.3 (+3%) | 147.2 (+35%) | 172.9 (+17%) | +174% |
-| 2560/300 | 16 | 377.9 | 396.9 (+5%) | 414.1 (+4%) | 412.8 (-0%) | 413.6 (+0%) | 398.3 (-4%) | +5% |
-| 2560/300 | 64 | 391.7 | 419.2 (+7%) | 426.2 (+2%) | 422.7 (-1%) | 423.0 (+0%) | 638.9 (+51%) | +63% |
+| 128/1024 | 1 | 78.0 | 99.8 (+28%) | 125.7 (+26%) | 131.1 (+4%) | 194.2 (+48%) | 243.4 (+25%) | +212% |
+| 128/1024 | 16 | 900.7 | 1048.4 (+16%) | 1049.2 (+0%) | 1047.8 (-0%) | 1049.5 (+0%) | 1050.1 (+0%) | +17% |
+| 128/1024 | 64 | 1171.3 | 1591.2 (+36%) | 1557.9 (-2%) | 1548.3 (-1%) | 1550.8 (+0%) | 1864.7 (+20%) | +59% |
+| 2560/300 | 1 | 62.5 | 83.4 (+33%) | 104.0 (+25%) | 107.7 (+4%) | 143.9 (+34%) | 168.2 (+17%) | +169% |
+| 2560/300 | 16 | 372.2 | 389.1 (+5%) | 389.3 (+0%) | 388.5 (-0%) | 389.1 (+0%) | 389.6 (+0%) | +5% |
+| 2560/300 | 64 | 392.9 | 422.9 (+8%) | 424.2 (+0%) | 421.4 (-1%) | 422.4 (+0%) | 480.6 (+14%) | +22% |
 
-Runs: 20261018T045319Z, 20261019T003224Z, 20261019T004110Z, 20261019T013129Z, 20261019T023002Z, 20261019T123105Z.
+Runs: 20261019T143422Z, 20261019T150009Z, 20261019T152606Z, 20261019T232759Z, 20261020T002938Z, 20261020T010402Z.
 <!-- /table -->
 
 At 4 loops the decode step is 10.22 ms on unmodified vLLM with Triton
@@ -264,7 +275,8 @@ every 3.8 to 5.4 ms depending on the text (section 4).
 ### How the fused path got there (2 loops)
 
 Each column records a benchmark run made when that stage was completed,
-using the code available at the time.
+using the code available at the time. These historical runs had prefix caching
+enabled, so prompt-heavy batch differences do not isolate each feature's effect.
 
 <!-- table:features-2 -->
 | Input/output | Users | vLLM default | Triton attention | + first fused decode path | + own attention kernel | + q/k norm in attention | + INT8 LM head | + wavefront |
@@ -355,32 +367,33 @@ efficiency (60% of bandwidth today; launch boundaries alone cost up to 0.7 ms,
 
 The table compares vLLM's default FlashAttention backend, unmodified vLLM with
 Triton attention, and the changes in this repository. The final configuration
-uses the fused decode path and INT8 LM head, plus wavefront decoding at two or
-more loops. All three use NVFP4.
+uses the fused decode path and INT8 LM head, plus wavefront decoding and the
+shared KV cache at two or more loops. All three use NVFP4 and disable prefix
+caching.
 
 <!-- table:final -->
 | Loops | Input/output | Users | vLLM as shipped | Unmodified vLLM, Triton attention | This work | Over vLLM as shipped | Over Triton attention |
 |---:|---|---:|---:|---:|---:|---:|---:|
-| 1 | 128/1024 | 1 | 188.8 | 234.8 | 318.6 | +69% | +36% |
-| 1 | 128/1024 | 16 | 2204.2 | 2523.5 | 2531.8 | +15% | +0% |
-| 1 | 128/1024 | 64 | 3453.5 | 4702.5 | 4677.7 | +35% | -1% |
-| 1 | 2560/300 | 1 | 154.7 | 201.9 | 268.7 | +74% | +33% |
-| 1 | 2560/300 | 16 | 911.5 | 952.8 | 1058.5 | +16% | +11% |
-| 1 | 2560/300 | 64 | 1312.1 | 1576.2 | 1707.4 | +30% | +8% |
-| 2 | 128/1024 | 1 | 128.1 | 161.7 | 250.8 | +96% | +55% |
-| 2 | 128/1024 | 16 | 1488.2 | 1721.1 | 1719.5 | +16% | -0% |
-| 2 | 128/1024 | 64 | 2281.0 | 3145.9 | 3145.0 | +38% | -0% |
-| 2 | 2560/300 | 1 | 104.3 | 138.0 | 201.8 | +94% | +46% |
-| 2 | 2560/300 | 16 | 661.3 | 697.2 | 697.8 | +6% | +0% |
-| 2 | 2560/300 | 64 | 659.3 | 779.3 | 784.7 | +19% | +1% |
-| 4 | 128/1024 | 1 | 77.9 | 99.6 | 248.4 | +219% | +149% |
-| 4 | 128/1024 | 16 | 903.2 | 1049.0 | 1050.9 | +16% | +0% |
-| 4 | 128/1024 | 64 | 1164.7 | 1583.8 | 1890.7 | +62% | +19% |
-| 4 | 2560/300 | 1 | 63.2 | 84.4 | 172.9 | +174% | +105% |
-| 4 | 2560/300 | 16 | 377.9 | 396.9 | 398.3 | +5% | +0% |
-| 4 | 2560/300 | 64 | 391.7 | 419.2 | 638.9 | +63% | +52% |
+| 1 | 128/1024 | 1 | 188.2 | 234.8 | 318.8 | +69% | +36% |
+| 1 | 128/1024 | 16 | 2201.1 | 2523.0 | 2527.5 | +15% | +0% |
+| 1 | 128/1024 | 64 | 3421.4 | 4648.9 | 4637.5 | +36% | -0% |
+| 1 | 2560/300 | 1 | 152.2 | 199.1 | 264.9 | +74% | +33% |
+| 1 | 2560/300 | 16 | 956.3 | 996.5 | 996.9 | +4% | +0% |
+| 1 | 2560/300 | 64 | 1055.5 | 1256.2 | 1256.1 | +19% | -0% |
+| 2 | 128/1024 | 1 | 127.7 | 161.9 | 264.1 | +107% | +63% |
+| 2 | 128/1024 | 16 | 1485.4 | 1718.5 | 1716.3 | +16% | -0% |
+| 2 | 128/1024 | 64 | 2263.3 | 3108.3 | 3103.2 | +37% | -0% |
+| 2 | 2560/300 | 1 | 103.3 | 136.3 | 208.7 | +102% | +53% |
+| 2 | 2560/300 | 16 | 627.8 | 655.7 | 654.4 | +4% | -0% |
+| 2 | 2560/300 | 64 | 657.4 | 776.9 | 814.8 | +24% | +5% |
+| 4 | 128/1024 | 1 | 78.0 | 99.8 | 243.4 | +212% | +144% |
+| 4 | 128/1024 | 16 | 900.7 | 1048.4 | 1050.1 | +17% | +0% |
+| 4 | 128/1024 | 64 | 1171.3 | 1591.2 | 1864.7 | +59% | +17% |
+| 4 | 2560/300 | 1 | 62.5 | 83.4 | 168.2 | +169% | +102% |
+| 4 | 2560/300 | 16 | 372.2 | 389.1 | 389.6 | +5% | +0% |
+| 4 | 2560/300 | 64 | 392.9 | 422.9 | 480.6 | +22% | +14% |
 
-Runs: 20261018T045319Z, 20261018T114127Z, 20261018T180516Z, 20261019T003224Z, 20261019T022147Z, 20261019T024248Z, 20261019T123105Z.
+Runs: 20261019T150009Z, 20261019T152606Z, 20261019T232759Z, 20261020T010402Z, 20261020T015236Z.
 <!-- /table -->
 
 - The single-user rows are this work's target. Batched rows run vLLM's own
@@ -389,7 +402,7 @@ Runs: 20261018T045319Z, 20261018T114127Z, 20261018T180516Z, 20261019T003224Z, 20
   at 4 loops: 64 x 1152 tokens against about 57,000 tokens of cache).
 - Against the default backend, batched rows also gain from Triton attention.
 
-### With Dory's shared KV cache (4 loops)
+### With Dory's shared KV cache (2 and 4 loops)
 
 Dory can also keep one KV cache per recurrent layer that every loop overwrites
 (`recurrent_kv_cache_mode: "last_loop"`, the WaveFront paper's cross-recurrence
@@ -399,27 +412,45 @@ tokens see older in-flight tokens at their latest loop, not their last), within
 the accuracy gate's noise floor (section 6). "Change" is the last column against
 the first.
 
+#### 2 loops
+
+<!-- table:shared-kv-2 -->
+| Input/output | Users | Unmodified, per-loop KV | This work, per-loop KV | Unmodified, shared KV | Fused path, shared KV | This work, shared KV | Change |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 128/1024 | 1 | 161.9 | 251.0 | 161.6 | 216.1 | 264.1 | +63% |
+| 128/1024 | 16 | 1718.5 | 1717.0 | 1718.2 | 1718.0 | 1716.3 | -0% |
+| 128/1024 | 64 | 3108.3 | 3111.1 | 3107.7 | 3105.1 | 3103.2 | -0% |
+| 2560/300 | 1 | 136.3 | 197.9 | 136.0 | 178.5 | 208.7 | +53% |
+| 2560/300 | 16 | 655.7 | 656.3 | 655.6 | 655.7 | 654.4 | -0% |
+| 2560/300 | 64 | 776.9 | 782.1 | 815.2 | 816.4 | 814.8 | +5% |
+
+Runs: 20261019T143422Z, 20261019T160704Z, 20261019T232759Z, 20261020T000323Z, 20261020T015236Z.
+<!-- /table -->
+
+#### 4 loops
+
 <!-- table:shared-kv-4 -->
 | Input/output | Users | Unmodified, per-loop KV | This work, per-loop KV | Unmodified, shared KV | Fused path, shared KV | This work, shared KV | Change |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| 128/1024 | 1 | 99.6 | 184.5 | 99.9 | 131.5 | 248.4 | +149% |
-| 128/1024 | 16 | 1049.0 | 1049.7 | 1051.0 | 1051.7 | 1050.9 | +0% |
-| 128/1024 | 64 | 1583.8 | 1566.8 | 1889.5 | 1889.2 | 1890.7 | +19% |
-| 2560/300 | 1 | 84.4 | 147.2 | 84.6 | 109.8 | 172.9 | +105% |
-| 2560/300 | 16 | 396.9 | 413.6 | 398.2 | 415.3 | 398.3 | +0% |
-| 2560/300 | 64 | 419.2 | 423.0 | 637.8 | 659.6 | 638.9 | +52% |
+| 128/1024 | 1 | 99.8 | 194.2 | 99.7 | 131.5 | 243.4 | +144% |
+| 128/1024 | 16 | 1048.4 | 1049.5 | 1049.6 | 1049.7 | 1050.1 | +0% |
+| 128/1024 | 64 | 1591.2 | 1550.8 | 1869.7 | 1869.8 | 1864.7 | +17% |
+| 2560/300 | 1 | 83.4 | 143.9 | 83.5 | 107.9 | 168.2 | +102% |
+| 2560/300 | 16 | 389.1 | 389.1 | 389.4 | 389.2 | 389.6 | +0% |
+| 2560/300 | 64 | 422.9 | 422.4 | 480.8 | 480.3 | 480.6 | +14% |
 
-Runs: 20261019T003224Z, 20261019T013129Z, 20261019T111134Z, 20261019T122346Z, 20261019T123105Z.
+Runs: 20261019T143422Z, 20261019T150009Z, 20261019T160704Z, 20261019T232759Z, 20261020T000323Z.
 <!-- /table -->
 
-- The shared cache holds 173,814 tokens on unmodified vLLM and 151,915 with the
-  fused path's weight copy, against 65,169 and 56,966 per-loop, so the
-  64-user rows that filled the per-loop cache gain 19% (128/1024) and 52%
-  (2560/300).
+- At 4 loops the shared cache holds 173,814 tokens on unmodified vLLM and
+  151,915 with the fused path's weight copy, against 65,180 and 56,966
+  per-loop. Comparing the wavefront configurations, shared KV raises 64-user
+  throughput by 20% (128/1024) and 14% (2560/300).
 - Drafts match more often on the shared cache: vLLM sampled 96.2% of them in
   these random-token runs (87 to 92% per-loop) and 97.1% on chat prompts with
-  temperature 1 and top-p 0.95 (94.5% per-loop), so one user gains 89% over the
-  fused path at 128/1024 (248.4 against 131.5 tok/s) instead of 41%.
+  temperature 1 and top-p 0.95 (94.5% per-loop). In the corrected 4-loop suite,
+  one user gains 85% over the fused path at 128/1024 (243.4 against 131.5
+  tok/s) on shared KV, compared with 48% (194.2 against 131.1) per-loop.
 
 ## 6. Accuracy
 
@@ -460,9 +491,92 @@ also checked on tasks at 2 loops (`results/task_eval_20261018T195326Z/report.md`
 GSM8K 89.6% against 90.4% with the BF16 head (250 problems, McNemar p = 0.69)
 and MMLU 60.8% against 60.7% (1000 questions, p = 1.00).
 
-With sampling, every token is drawn by vLLM's sampler from the full-depth
-logits, so the wavefront changes which tokens get computed ahead of time, not
-the distribution of the output.
+With per-loop caches, every token is drawn by vLLM's sampler from the full-depth
+logits, so drafting preserves the sequential decoder's sampling distribution
+apart from numerical differences. On the shared cache, the full-depth logits
+also reflect the approximation described in section 5.
+
+## 7. Complete serving suite, 1 to 64 users
+
+All configurations below use NVFP4 and disable prefix caching. "Fused path"
+uses the INT8 LM head; section 3 separately measures the BF16 head. Shared
+caching and the wavefront do not apply at one loop. "Best over shipped" compares
+the fastest measured configuration of this work in each row with vLLM's default
+backend; it is not a single serving configuration.
+
+### 1 loop
+
+<!-- table:suite-1 -->
+| Input/output | Users | vLLM as shipped | Triton attention | Fused path | Fused + wavefront | Triton, shared KV | Fused, shared KV | Fused + wavefront, shared KV | Best over shipped |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 128/1024 | 1 | 188.2 | 234.8 | 318.8 | n/a | n/a | n/a | n/a | +69% |
+| 128/1024 | 2 | 372.3 | 455.3 | 454.8 | n/a | n/a | n/a | n/a | +22% |
+| 128/1024 | 4 | 732.4 | 857.7 | 857.6 | n/a | n/a | n/a | n/a | +17% |
+| 128/1024 | 8 | 1401.8 | 1538.1 | 1539.0 | n/a | n/a | n/a | n/a | +10% |
+| 128/1024 | 16 | 2201.1 | 2523.0 | 2527.5 | n/a | n/a | n/a | n/a | +15% |
+| 128/1024 | 32 | 3037.7 | 3620.8 | 3620.8 | n/a | n/a | n/a | n/a | +19% |
+| 128/1024 | 64 | 3421.4 | 4648.9 | 4637.5 | n/a | n/a | n/a | n/a | +36% |
+| 2560/300 | 1 | 152.2 | 199.1 | 264.9 | n/a | n/a | n/a | n/a | +74% |
+| 2560/300 | 2 | 282.6 | 353.1 | 352.4 | n/a | n/a | n/a | n/a | +25% |
+| 2560/300 | 4 | 488.5 | 560.8 | 561.1 | n/a | n/a | n/a | n/a | +15% |
+| 2560/300 | 8 | 767.7 | 793.0 | 793.2 | n/a | n/a | n/a | n/a | +3% |
+| 2560/300 | 16 | 956.3 | 996.5 | 996.9 | n/a | n/a | n/a | n/a | +4% |
+| 2560/300 | 32 | 1072.5 | 1140.1 | 1142.1 | n/a | n/a | n/a | n/a | +6% |
+| 2560/300 | 64 | 1055.5 | 1256.2 | 1256.1 | n/a | n/a | n/a | n/a | +19% |
+
+Runs: 20261019T152606Z, 20261019T232759Z, 20261020T010402Z.
+<!-- /table -->
+
+### 2 loops
+
+<!-- table:suite-2 -->
+| Input/output | Users | vLLM as shipped | Triton attention | Fused path | Fused + wavefront | Triton, shared KV | Fused, shared KV | Fused + wavefront, shared KV | Best over shipped |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 128/1024 | 1 | 127.7 | 161.9 | 215.3 | 251.0 | 161.6 | 216.1 | 264.1 | +107% |
+| 128/1024 | 2 | 253.2 | 313.5 | 312.4 | 313.0 | 313.1 | 313.5 | 312.8 | +24% |
+| 128/1024 | 4 | 498.9 | 589.1 | 587.1 | 588.5 | 588.2 | 588.6 | 587.5 | +18% |
+| 128/1024 | 8 | 954.5 | 1054.0 | 1050.6 | 1050.7 | 1051.8 | 1052.9 | 1051.9 | +10% |
+| 128/1024 | 16 | 1485.4 | 1718.5 | 1713.5 | 1717.0 | 1718.2 | 1718.0 | 1716.3 | +16% |
+| 128/1024 | 32 | 2030.5 | 2440.0 | 2439.5 | 2441.7 | 2444.0 | 2445.2 | 2438.1 | +20% |
+| 128/1024 | 64 | 2263.3 | 3108.3 | 3100.2 | 3111.1 | 3107.7 | 3105.1 | 3103.2 | +37% |
+| 2560/300 | 1 | 103.3 | 136.3 | 177.3 | 197.9 | 136.0 | 178.5 | 208.7 | +102% |
+| 2560/300 | 2 | 189.5 | 239.1 | 238.4 | 239.0 | 238.7 | 238.7 | 238.8 | +26% |
+| 2560/300 | 4 | 327.1 | 377.3 | 375.9 | 376.3 | 376.4 | 376.9 | 375.5 | +15% |
+| 2560/300 | 8 | 507.9 | 526.8 | 524.3 | 526.4 | 526.1 | 526.4 | 524.5 | +4% |
+| 2560/300 | 16 | 627.8 | 655.7 | 654.4 | 656.3 | 655.6 | 655.7 | 654.4 | +5% |
+| 2560/300 | 32 | 699.1 | 744.9 | 743.4 | 745.3 | 745.1 | 745.1 | 743.8 | +7% |
+| 2560/300 | 64 | 657.4 | 776.9 | 780.0 | 782.1 | 815.2 | 816.4 | 814.8 | +24% |
+
+Runs: 20261019T143422Z, 20261019T152606Z, 20261019T160704Z, 20261019T232759Z, 20261020T000323Z, 20261020T010402Z, 20261020T015236Z.
+<!-- /table -->
+
+### 4 loops
+
+<!-- table:suite-4 -->
+| Input/output | Users | vLLM as shipped | Triton attention | Fused path | Fused + wavefront | Triton, shared KV | Fused, shared KV | Fused + wavefront, shared KV | Best over shipped |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 128/1024 | 1 | 78.0 | 99.8 | 131.1 | 194.2 | 99.7 | 131.5 | 243.4 | +212% |
+| 128/1024 | 2 | 154.5 | 192.8 | 192.8 | 193.3 | 192.9 | 193.1 | 192.8 | +25% |
+| 128/1024 | 4 | 304.3 | 362.4 | 361.8 | 362.2 | 362.4 | 362.7 | 362.1 | +19% |
+| 128/1024 | 8 | 583.9 | 645.5 | 644.0 | 645.6 | 645.5 | 646.0 | 645.2 | +11% |
+| 128/1024 | 16 | 900.7 | 1048.4 | 1047.8 | 1049.5 | 1049.6 | 1049.7 | 1050.1 | +17% |
+| 128/1024 | 32 | 1220.6 | 1480.3 | 1477.3 | 1479.7 | 1479.7 | 1480.8 | 1480.0 | +21% |
+| 128/1024 | 64 | 1171.3 | 1591.2 | 1548.3 | 1550.8 | 1869.7 | 1869.8 | 1864.7 | +60% |
+| 2560/300 | 1 | 62.5 | 83.4 | 107.7 | 143.9 | 83.5 | 107.9 | 168.2 | +169% |
+| 2560/300 | 2 | 114.6 | 145.7 | 145.5 | 145.7 | 145.5 | 145.8 | 145.5 | +27% |
+| 2560/300 | 4 | 196.7 | 227.8 | 227.5 | 227.6 | 227.7 | 227.9 | 227.9 | +16% |
+| 2560/300 | 8 | 303.9 | 315.0 | 314.1 | 315.1 | 314.8 | 315.1 | 315.2 | +4% |
+| 2560/300 | 16 | 372.2 | 389.1 | 388.5 | 389.1 | 389.4 | 389.2 | 389.6 | +5% |
+| 2560/300 | 32 | 392.9 | 422.8 | 421.5 | 422.5 | 439.9 | 439.6 | 440.3 | +12% |
+| 2560/300 | 64 | 392.9 | 422.9 | 421.4 | 422.4 | 480.8 | 480.3 | 480.6 | +22% |
+
+Runs: 20261019T143422Z, 20261019T150009Z, 20261019T152606Z, 20261019T160704Z, 20261019T232759Z, 20261020T000323Z, 20261020T010402Z.
+<!-- /table -->
+
+Wavefront decoding currently runs only when one request is decoding. At 4 loops
+and 128/1024 with shared KV, one user reaches 243.4 tok/s, while two users reach
+192.8 tok/s in total, about 96.4 each. Supporting separate wavefront pipelines
+for small batches is therefore a useful next step; see [Future work](FUTURE_WORK.md).
 
 ## Caveats
 
@@ -470,17 +584,21 @@ the distribution of the output.
   tuned for its RTX 4090.
 - The 64-user rows that fill the KV cache (128/1024 at 4 loops) preempt
   requests and vary by about 1% between runs; their time to first token varies
-  much more.
+  much more. With per-loop KV, the fused configurations are 2.1 to 2.7% slower
+  than unmodified Triton in the corrected suite. This exceeds the original 2%
+  batch target in EXPERIMENTS.md; the extra weight copy still reduces cache
+  capacity. Shared KV avoids that capacity limit in this workload.
 - The 128/1024 single-user row with the wavefront measured 201.7 to 201.9
   tok/s when it was a server's first benchmark and 184.5 when it followed the
   2560-token rows; the cause is not established.
-- **The 2560/300 rows with 16 and 64 users are bimodal.** Runs of one
-  configuration land on one of two levels, for example 650 or 697 tok/s at 16
-  users and 2 loops, and 955 or 1058 at 1 loop. The low level has a longer
-  time to first token and the same decode speed, and both levels occur with
-  and without this work's code, so differences of up to 11% between columns
-  in those rows are not effects of the features. The cause is not established:
-  it is not the prompts (the benchmark's seed is fixed) and not whether the
-  server compiled the model or loaded it from vLLM's compile cache (both
-  levels occur either way). Single-user rows and the 128/1024 rows are not
-  affected. Details: EXPERIMENTS.md, E23.
+- **Older serving runs reused prompt prefixes.** Repeated random-token
+  benchmarks used the same seed on a server with prefix caching enabled.
+  Later rows therefore reused some earlier prompt processing. In the first
+  expanded suite, the cumulative prefix-cache hit rate reached 73%. This
+  inflated throughput and shortened time to first token for prompt-heavy rows,
+  explaining the earlier 2560/300 batch variation recorded in EXPERIMENTS.md,
+  E23. With the cache disabled, Triton at 2 loops and 16 users measured 655.4
+  tok/s, against 849.2 in that expanded suite with caching enabled. The
+  corrected tables above disable prefix caching; the historical tables are
+  labeled explicitly. This finding does not establish the cause of the
+  separate wavefront order effect described above.

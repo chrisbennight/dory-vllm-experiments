@@ -158,7 +158,8 @@ def stop_server(server: subprocess.Popen) -> None:
 def start_server(variant: str, loops: int, attention_backend: str | None,
                  server_log: Path, extra_args: list[str] | None = None,
                  async_scheduling: bool = True,
-                 extra_overrides: dict | None = None) -> subprocess.Popen:
+                 extra_overrides: dict | None = None,
+                 prefix_caching: bool = True) -> subprocess.Popen:
     overrides = {"n_recurrent_loops": loops, "recurrent_kv_cache_mode": "per_loop",
                  **(extra_overrides or {})}
     command = [
@@ -170,6 +171,7 @@ def start_server(variant: str, loops: int, attention_backend: str | None,
         "--gpu-memory-utilization", "0.90",
         "--hf-overrides", json.dumps(overrides),
         "--async-scheduling" if async_scheduling else "--no-async-scheduling",
+        "--enable-prefix-caching" if prefix_caching else "--disable-prefix-caching",
         "--seed", "0",
     ]
     if attention_backend:
@@ -262,6 +264,10 @@ def main() -> int:
     parser.add_argument("--shapes", nargs="+", default=[f"{i}/{o}" for i, o in SHAPES],
                         choices=[f"{i}/{o}" for i, o in SHAPES],
                         help="run only these input/output lengths")
+    parser.add_argument("--prefix-caching", action="store_true",
+                        help="keep vLLM's prefix cache on; off by default, because every "
+                             "benchmark draws its random prompts from the same seed, so later "
+                             "benchmarks on a server would reuse earlier ones' prompt work")
     parser.add_argument("--kv-cache-mode", default="per_loop", choices=["per_loop", "last_loop"],
                         help="the recurrent block's KV cache: one per loop (the model card's "
                              "default) or one per layer that every loop overwrites")
@@ -282,6 +288,7 @@ def main() -> int:
         "shapes": SHAPES,
         "concurrency_prompts": CONCURRENCY_PROMPTS,
         "kv_cache_mode": args.kv_cache_mode,
+        "prefix_caching": args.prefix_caching,
         "attention_backend": args.attention_backend,
         "server_env_overrides": SERVER_ENV,
         "cuda_home": os.environ.get("CUDA_HOME"),
@@ -315,7 +322,8 @@ def main() -> int:
                               async_scheduling=not args.no_async_scheduling,
                               extra_overrides={"recurrent_kv_cache_mode": args.kv_cache_mode,
                                                **({"wavefront_decode": True}
-                                                  if args.wavefront else {})})
+                                                  if args.wavefront else {})},
+                              prefix_caching=args.prefix_caching)
         try:
             wait_until_ready(server)
             log(f"server ready: {tag}; capturing reference outputs")

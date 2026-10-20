@@ -10,6 +10,8 @@ Usage: .venv/bin/python bench/publish_tables.py [--check]
 """
 
 import argparse
+from functools import cache
+import math
 import re
 import sys
 from pathlib import Path
@@ -34,18 +36,16 @@ FUSED_E5 = "20261018T181035Z"
 FUSED_E9 = "20261018T185825Z"  # the finished fused path, BF16 LM head
 FUSED_INT8_2 = "20261018T190327Z"
 WAVEFRONT_2 = "20261019T022147Z"
-TRITON_4 = "20261019T003224Z"  # unmodified, rerun in the 4-loop session
-FUSED_BF16_HEAD_1_4 = "20261019T023002Z"  # the finished fused path, BF16 LM head
-FUSED_INT8_1 = "20261019T024248Z"
-FUSED_INT8_4 = "20261019T004110Z"
-WAVEFRONT_4 = "20261019T013129Z"
-# Dory's shared KV cache ("last_loop"), 4 loops.
-UNMODIFIED_SHARED_4 = "20261019T111134Z"
-FUSED_SHARED_4 = "20261019T122346Z"
-WAVEFRONT_SHARED_4 = "20261019T123105Z"
-
-# A step whose run has not been made yet.
-PENDING = "pending"
+# The corrected suite disables prefix caching for independent random prompts.
+SUITE_USERS = (1, 2, 4, 8, 16, 32, 64)
+SUITE_SHIPPED = "20261019T152606Z"
+SUITE_TRITON = "20261019T232759Z"
+SUITE_TRITON_SHARED = "20261019T160704Z"
+SUITE_FUSED_BF16_HEAD = "20261020T002938Z"
+SUITE_FUSED = "20261020T010402Z"
+SUITE_FUSED_SHARED = "20261020T000323Z"
+SUITE_WAVEFRONT = "20261019T143422Z"
+SHARED_WAVEFRONT_RUNS = {2: "20261020T015236Z", 4: "20261019T150009Z"}
 
 # From vLLM as shipped to this work, one feature per step; None where a step
 # does not apply (the wavefront needs at least two loops, and with one loop
@@ -53,10 +53,11 @@ PENDING = "pending"
 STEP_LABELS = ("vLLM as shipped", "+ Triton attention", "+ fused decode path",
                "+ INT8 LM head", "+ wavefront", "+ shared KV cache")
 STEPS = {
-    1: (DEFAULT_NVFP4, TRITON_NVFP4, FUSED_BF16_HEAD_1_4, FUSED_INT8_1, None, None),
-    2: (DEFAULT_NVFP4, TRITON_2, FUSED_E9, FUSED_INT8_2, WAVEFRONT_2, PENDING),
-    4: (DEFAULT_NVFP4, TRITON_4, FUSED_BF16_HEAD_1_4, FUSED_INT8_4, WAVEFRONT_4,
-        WAVEFRONT_SHARED_4),
+    1: (SUITE_SHIPPED, SUITE_TRITON, SUITE_FUSED_BF16_HEAD, SUITE_FUSED, None, None),
+    2: (SUITE_SHIPPED, SUITE_TRITON, SUITE_FUSED_BF16_HEAD, SUITE_FUSED,
+        SUITE_WAVEFRONT, SHARED_WAVEFRONT_RUNS[2]),
+    4: (SUITE_SHIPPED, SUITE_TRITON, SUITE_FUSED_BF16_HEAD, SUITE_FUSED,
+        SUITE_WAVEFRONT, SHARED_WAVEFRONT_RUNS[4]),
 }
 
 # Tables of plain columns: name -> (columns, change). A column is (label, run,
@@ -75,11 +76,13 @@ COLUMN_TABLES = {
                                     ("MXFP8", DEFAULT_MXFP8, "mxfp8", loops),
                                     ("NVFP4", DEFAULT_NVFP4, "nvfp4", loops)], True)
        for loops in (1, 2, 4)},
-    "shared-kv-4": ([("Unmodified, per-loop KV", TRITON_4, "nvfp4", 4),
-                     ("This work, per-loop KV", WAVEFRONT_4, "nvfp4", 4),
-                     ("Unmodified, shared KV", UNMODIFIED_SHARED_4, "nvfp4", 4),
-                     ("Fused path, shared KV", FUSED_SHARED_4, "nvfp4", 4),
-                     ("This work, shared KV", WAVEFRONT_SHARED_4, "nvfp4", 4)], True),
+    **{f"shared-kv-{loops}": (
+        [("Unmodified, per-loop KV", SUITE_TRITON, "nvfp4", loops),
+         ("This work, per-loop KV", SUITE_WAVEFRONT, "nvfp4", loops),
+         ("Unmodified, shared KV", SUITE_TRITON_SHARED, "nvfp4", loops),
+         ("Fused path, shared KV", SUITE_FUSED_SHARED, "nvfp4", loops),
+         ("This work, shared KV", SHARED_WAVEFRONT_RUNS[loops], "nvfp4", loops)], True)
+       for loops in (2, 4)},
     "features-2": ([("vLLM default", DEFAULT_NVFP4, "nvfp4", 2),
                     ("Triton attention", TRITON_2, "nvfp4", 2),
                     ("+ first fused decode path", FUSED_FIRST, "nvfp4", 2),
@@ -90,6 +93,7 @@ COLUMN_TABLES = {
 }
 
 
+@cache
 def output_rates(run: str) -> dict[tuple, float]:
     """(variant, loops, input, output, concurrency) -> output tokens/s."""
     return {(r["variant"], r["loops"], r["input_len"], r["output_len"], r["concurrency"]):
@@ -97,7 +101,7 @@ def output_rates(run: str) -> dict[tuple, float]:
 
 
 def runs_line(runs) -> str:
-    return f"Runs: {', '.join(sorted({run for run in runs if run and run != PENDING}))}."
+    return f"Runs: {', '.join(sorted({run for run in runs if run}))}."
 
 
 def column_table(columns: list[tuple], change: bool) -> str:
@@ -123,8 +127,8 @@ def step_cells(loops: int, inp: int, out: int, users: int) -> list[str]:
     then the total change."""
     cells, first, previous = [], None, None
     for run in STEPS[loops]:
-        if run is None or run == PENDING:
-            cells.append("n/a" if run is None else PENDING)
+        if run is None:
+            cells.append("n/a")
             continue
         value = output_rates(run)[("nvfp4", loops, inp, out, users)]
         cells.append(f"{value:.1f}" if previous is None
@@ -164,7 +168,7 @@ def final_table() -> str:
     runs = []
     for loops, steps in STEPS.items():
         shipped, triton = steps[0], steps[1]
-        best = [r for r in steps if r and r != PENDING][-1]
+        best = [r for r in steps if r][-1]
         runs += [shipped, triton, best]
         for inp, out in SHAPES:
             for users in CONCURRENCY:
@@ -177,30 +181,78 @@ def final_table() -> str:
     return "\n".join(lines + ["", runs_line(runs)])
 
 
-# The complete suite: every configuration at 1 to 64 users, run in one session.
-SUITE_USERS = (1, 2, 4, 8, 16, 32, 64)
-SUITE_SHIPPED = "PENDING_SHIPPED"  # vLLM as shipped (FLASH_ATTN), per-loop KV
-SUITE_TRITON = "PENDING_TRITON"
-SUITE_TRITON_SHARED = "PENDING_TRITON_SHARED"
-SUITE_FUSED = "PENDING_FUSED"  # fused path, INT8 LM head
-SUITE_FUSED_SHARED = "PENDING_FUSED_SHARED"
-SUITE_WAVEFRONT = "PENDING_WAVEFRONT"
-SUITE_WAVEFRONT_SHARED = "PENDING_WAVEFRONT_SHARED"
-SUITE_COLUMNS = (("vLLM as shipped", SUITE_SHIPPED, False, False),
-                 ("Triton attention", SUITE_TRITON, False, False),
-                 ("Fused path", SUITE_FUSED, False, False),
-                 ("Fused + wavefront", SUITE_WAVEFRONT, False, True),
-                 ("Triton, shared KV", SUITE_TRITON_SHARED, True, False),
-                 ("Fused, shared KV", SUITE_FUSED_SHARED, True, False),
-                 ("Fused + wavefront, shared KV", SUITE_WAVEFRONT_SHARED, True, True))
+SUITE_COLUMNS = (
+    ("vLLM as shipped", {n: SUITE_SHIPPED for n in STEPS}),
+    ("Triton attention", {n: SUITE_TRITON for n in STEPS}),
+    ("Fused path", {n: SUITE_FUSED for n in STEPS}),
+    ("Fused + wavefront", {n: SUITE_WAVEFRONT for n in (2, 4)}),
+    ("Triton, shared KV", {n: SUITE_TRITON_SHARED for n in (2, 4)}),
+    ("Fused, shared KV", {n: SUITE_FUSED_SHARED for n in (2, 4)}),
+    ("Fused + wavefront, shared KV", SHARED_WAVEFRONT_RUNS),
+)
+
+
+def validate_suite() -> None:
+    """Require complete, comparable measurements before publishing the suite."""
+    configurations = (
+        (SUITE_SHIPPED, (1, 2, 4), None, "per_loop", False, None, False, SHAPES),
+        (SUITE_TRITON, (1, 2, 4), "TRITON_ATTN", "per_loop", False, None, False, SHAPES),
+        (SUITE_TRITON_SHARED, (2, 4), "TRITON_ATTN", "last_loop", False, None, False, SHAPES),
+        (SUITE_FUSED_BF16_HEAD, (1, 2, 4), "TRITON_ATTN", "per_loop", True, "none", False,
+         SHAPES),
+        (SUITE_FUSED, (1, 2, 4), "TRITON_ATTN", "per_loop", True, "int8", False, SHAPES),
+        (SUITE_FUSED_SHARED, (2, 4), "TRITON_ATTN", "last_loop", True, "int8", False, SHAPES),
+        (SUITE_WAVEFRONT, (2, 4), "TRITON_ATTN", "per_loop", True, "int8", True, SHAPES),
+        (SHARED_WAVEFRONT_RUNS[2], (2,), "TRITON_ATTN", "last_loop", True, "int8", True,
+         SHAPES),
+        (SHARED_WAVEFRONT_RUNS[4], (4,), "TRITON_ATTN", "last_loop", True, "int8", True,
+         SHAPES),
+    )
+    reference = None
+    for run, loops, backend, mode, fused, head, wavefront, shapes in configurations:
+        manifest, rows = load_rows(ROOT / "results" / run)
+        expected_settings = {
+            "prefix_caching": False, "attention_backend": backend,
+            "kv_cache_mode": mode, "wavefront_decode": wavefront,
+            "dory_lm_head_8bit": head, "async_scheduling": True,
+        }
+        if (manifest.get("aborted") or
+                bool(manifest.get("dory_fused_decode")) != fused or
+                any(manifest.get(k) != v for k, v in expected_settings.items())):
+            raise ValueError(f"{run}: unexpected benchmark settings")
+        provenance = (manifest["versions"], manifest["vllm_pr_sha"],
+                      manifest["model_revisions"], manifest["gpu"]["name"],
+                      manifest["gpu"]["driver"], manifest["server_env_overrides"],
+                      manifest.get("vllm_use_v2_model_runner"))
+        if reference is None:
+            reference = provenance
+        elif provenance != reference:
+            raise ValueError(f"{run}: software, model, GPU or sampler differs")
+        configs = manifest["configs"]
+        expected_configs = {("nvfp4", n) for n in loops}
+        if (len(configs) != len(expected_configs) or
+                {(c["variant"], c["loops"]) for c in configs} != expected_configs or
+                any(c["status"] != "ok" for c in configs)):
+            raise ValueError(f"{run}: incomplete configurations")
+        expected_keys = {("nvfp4", n, i, o, u)
+                         for n in loops for i, o in shapes for u in SUITE_USERS}
+        keys = {(r["variant"], r["loops"], r["input_len"], r["output_len"],
+                 r["concurrency"]) for r in rows}
+        if keys != expected_keys or len(rows) != len(expected_keys):
+            raise ValueError(f"{run}: missing or duplicate benchmark rows")
+        for row in rows:
+            expected_requests = {1: 8, 2: 8, 4: 16, 8: 32, 16: 64, 32: 128, 64: 128}[
+                row["concurrency"]]
+            if (row["failed"] != 0 or row["completed"] != expected_requests or
+                    not math.isfinite(row["output_tps"]) or row["output_tps"] <= 0):
+                raise ValueError(f"{run}: failed or invalid benchmark row")
 
 
 def suite_table(loops: int) -> str:
     """Every configuration of the complete suite at one loop count; columns that
     do not apply (a shared cache or the wavefront at 1 loop) are n/a. "Best" is
     the fastest configuration of this work against vLLM as shipped."""
-    columns = [(label, run if loops > 1 or not (shared or wavefront) else None)
-               for label, run, shared, wavefront in SUITE_COLUMNS]
+    columns = [(label, runs.get(loops)) for label, runs in SUITE_COLUMNS]
     rates = {run: output_rates(run) for _, run in columns if run}
     header = ["Input/output", "Users", *(label for label, _ in columns), "Best over shipped"]
     lines = ["| " + " | ".join(header) + " |", "|---|---:|" + "---:|" * (len(header) - 2)]
@@ -237,6 +289,7 @@ def main() -> int:
     parser.add_argument("--check", action="store_true",
                         help="fail if a document's tables differ from the runs")
     args = parser.parse_args()
+    validate_suite()
     pattern = re.compile(r"(<!-- table:([\w-]+) -->\n).*?(<!-- /table -->)", re.S)
     stale = []
     for doc in DOCS:

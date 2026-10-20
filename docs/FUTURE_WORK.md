@@ -53,7 +53,7 @@ Items from earlier plans that are finished, so they are not repeated below:
   also need review.
 - **The fused path keeps a second copy of the layer weights** in its own
   layout. This reduces available KV cache capacity by 11 to 13%. Batched
-  throughput falls where the cache is full (128/1024 with 64 users at 4 loops: 1 to 2%
+  throughput falls where the cache is full (128/1024 with 64 users at 4 loops: 2 to 3%
   slower than unmodified vLLM, for the fused path with or without the
   wavefront). Removing it needs vLLM's batched GEMMs to read the fused layout,
   or the fused kernels to read vLLM's.
@@ -73,40 +73,47 @@ treats it as an optional, approximate extension: on Huginn-3.5B it raised
 draft acceptance from 0.88 to 0.98 and the speedup over normal decoding from
 2.54x to 4.81x, with accuracy within 0.7 points. Dory supports a form of it
 natively, `recurrent_kv_cache_mode: "last_loop"` (one cache per recurrent
-layer that every loop overwrites). This work uses per-loop caches throughout,
-which keeps the wavefront exact against sequential decoding.
+layer that every loop overwrites). Both cache modes are supported. Per-loop
+caches keep the wavefront exact against sequential decoding on the same kernels;
+shared caches trade that property for greater capacity and draft agreement.
 
-The first step is measured (E24): the shared cache on unmodified vLLM at 4
-loops, against per-loop caches.
+The shared cache was first checked on unmodified vLLM at 4 loops (E24).
+The serving numbers below use the corrected suite with prefix caching disabled;
+the task-quality checks are unchanged.
 
 | 4 loops, unmodified vLLM | Per-loop KV | Shared KV (`last_loop`) |
 |---|---:|---:|
-| KV cache | 65,169 tokens | 173,814 tokens (2.67x) |
-| One user, 128/1024 | 99.6 tok/s | 99.9 tok/s |
-| 64 users, 128/1024 | 1583.8 tok/s | 1889.5 tok/s (+19%) |
-| 64 users, 2560/300 | 419.2 tok/s | 637.8 tok/s (+52%) |
+| KV cache | 65,180 tokens | 173,814 tokens (2.67x) |
+| One user, 128/1024 | 99.8 tok/s | 99.7 tok/s |
+| 64 users, 128/1024 | 1591.2 tok/s | 1869.7 tok/s (+17%) |
+| 64 users, 2560/300 | 422.9 tok/s | 480.8 tok/s (+14%) |
 | GSM8K, 250 problems | 90.8% | 91.2% (McNemar p = 1.00) |
 | MMLU, 1000 questions | 62.3% | 62.7% (p = 0.29) |
 | Greedy agreement, 64 prompts | reference | no divergent token outside the top 5 |
 
 The shared cache does not change one user's speed on its own (the weights
-dominate a step at these context lengths), triples the KV capacity, and turns
-the KV-limited 64-user rows into large gains. It changes predictions more than
-switching attention backends does (log-probability drift 0.0078 against the
+dominate a step at these context lengths), holds 2.67 times as many tokens,
+and turns the KV-limited 64-user rows into large gains. It changes predictions
+more than switching attention backends does (log-probability drift 0.0078 against the
 noise floor's 0.0066), as a different cache semantics should, but shows no
 task-quality loss on GSM8K or MMLU.
 
-The fused path and the wavefront now run on the shared cache too (E25, 4
-loops, random-token serving prompts):
+The fused path and the wavefront run on the shared cache too (E25). Their
+corrected serving results at 4 loops, with random-token prompts:
 
 | 4 loops | Per-loop KV | Shared KV |
 |---|---:|---:|
 | Fused path, one user, 128/1024 | 131.1 tok/s | 131.5 tok/s |
-| Wavefront, one user, 128/1024 | 184.5 to 201.9 tok/s | 248.4 tok/s |
-| Wavefront, one user, 2560/300 | 147.2 tok/s | 172.9 tok/s |
+| Wavefront, one user, 128/1024 | 194.2 tok/s | 243.4 tok/s |
+| Wavefront, one user, 2560/300 | 143.9 tok/s | 168.2 tok/s |
 | Drafts sampled by vLLM (random prompts) | 87 to 92% | 96.2% |
 | Drafts sampled by vLLM (chat, temperature 1) | 94.5% | 97.1% |
 | KV cache with the fused path | 56,966 tokens | 151,915 tokens |
+
+The corrected suite also measures 2-loop shared-cache wavefront decoding at
+264.1 tok/s (128/1024) and 208.7 tok/s (2560/300), about 5% above per-loop
+wavefront decoding. Full tables and run identifiers are in
+[Benchmarks](BENCHMARKS.md).
 
 The wavefront on a shared cache approximates sequential decoding: an
 in-flight token reads older in-flight tokens at their deepest loop so far,
@@ -118,14 +125,16 @@ within the accuracy gate's noise floor (log-probability drift 0.0066 against
 Still open:
 
 1. **A default.** At 4 loops the shared cache is faster for one user and holds
-   2.3 times as many tokens, at a measured quality cost within noise; the
+   about 2.7 times as many tokens at the same weight layout, at a measured
+   quality cost within noise; the
    model card's default is per-loop caches. Which to serve with is a
    deployment decision, and more task coverage (longer generations, thinking
    enabled, other benchmarks) would make it a better-informed one.
 2. **Long contexts.** The shared cache's capacity makes 8K-token contexts
    practical for many users at once; the wavefront's speed there, where
    attention reads matter more, is not measured.
-3. **Other loop counts.** E24 and E25 measured 4 loops only.
+3. **Quality at other loop counts.** The corrected serving suite includes 2
+   loops; the shared-cache task-quality checks still cover 4 loops only.
 
 ## Wavefront decoding
 
@@ -155,7 +164,9 @@ Still open:
 5. **Small batches.** The multi-token kernels take up to 16 tokens, so one
    recurrent call could advance separate pipelines for two to four users.
    This needs per-request pipeline state and measurements to determine when
-   it is faster than vLLM's batched path.
+   it is faster than vLLM's batched path. The corrected suite shows the cost of
+   the current boundary: at 4 loops with shared KV and 128/1024, one user gets
+   243.4 tok/s, while two users get 192.8 tok/s in total, about 96.4 each.
 6. **Understand the order effect.** The single-user 128/1024 row measured 201.9
    tok/s as a server's first benchmark and 184.5 after the 2560-token rows,
    reproducibly; the cause is not established.
@@ -183,7 +194,9 @@ Still open:
   serving conditions.
 - Long contexts (8K) and the time to first token, which this work does not
   change.
-- **Bimodal long-prompt batch rows**: the 2560/300 rows with 16 and 64 users
-  land on one of two levels, up to 11% apart, in runs of the same
-  configuration (E23). Finding the cause would make those rows comparable
-  across configurations; until then they need repeated runs.
+- **Historical benchmark coverage**: prefix-cache reuse across repeated seeded
+  prompts inflated older long-prompt batch results. The corrected serving suite
+  disables prefix caching. The attention-backend, quantization and early
+  development-history tables still use the older method and are labeled in
+  [Benchmarks](BENCHMARKS.md); rerunning those surveys would make them
+  comparable with the corrected suite.
